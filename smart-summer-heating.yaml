@@ -20,6 +20,7 @@ blueprint:
       selector:
         entity:
           domain: sensor
+          device_class: temperature
 
 
     climate_targets:
@@ -202,9 +203,8 @@ action:
             id: "ventil_uebung"
           - condition: template
             value_template: "{{ valve_exercise_enabled }}"
-          - condition: time
-            weekday:
-              - "{{ valve_exercise_day }}"
+          - condition: template
+            value_template: "{{ now().strftime('%a').lower() == valve_exercise_day }}"
           - condition: numeric_state
             entity_id: !input outdoor_temp_sensor
             above: !input summer_on_threshold
