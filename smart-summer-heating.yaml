@@ -4,8 +4,7 @@ blueprint:
     Schaltet Thermostate automatisch AUS wenn die Außentemperatur dauerhaft
     über einem Schwellwert bleibt – und wieder EIN im Herbst. Das normale
     Heizprogramm läuft danach unverändert weiter. Verwendet Hysterese um
-    Flapping zu verhindern. Thermostate werden dynamisch über Bereich,
-    Gerät oder Entität ausgewählt. Optional: wöchentliche Ventilübung.
+    Flapping zu verhindern. Optional: wöchentliche Ventilübung.
   domain: automation
   author: "marco@disane.dev"
   homeassistant:
@@ -15,19 +14,15 @@ blueprint:
 
     outdoor_temp_sensor:
       name: "Außentemperatursensor"
-      description: >
-        Sensor der die aktuelle Außentemperatur liefert.
+      description: "Sensor der die aktuelle Außentemperatur liefert."
       selector:
         entity:
           domain: sensor
           device_class: temperature
 
-
     climate_targets:
       name: "Thermostate"
-      description: >
-        Wähle alle Thermostate aus die im Sommer aus- bzw. eingeschaltet werden sollen.
-        Mehrfachauswahl möglich.
+      description: "Wähle alle Thermostate aus. Mehrfachauswahl möglich."
       selector:
         entity:
           domain: climate
@@ -47,9 +42,7 @@ blueprint:
 
     summer_off_threshold:
       name: "Ausschalt-Schwellwert (Hysterese)"
-      description: >
-        Außentemperatur unter der die Thermostate wieder eingeschaltet werden.
-        Muss niedriger sein als der Einschalt-Schwellwert.
+      description: "Außentemperatur unter der die Thermostate wieder eingeschaltet werden."
       default: 12
       selector:
         number:
@@ -61,9 +54,7 @@ blueprint:
 
     confirmation_hours:
       name: "Bestätigungsdauer (Stunden)"
-      description: >
-        Wie lange die Temperatur den Schwellwert kontinuierlich über- bzw.
-        unterschreiten muss bevor umgeschaltet wird.
+      description: "Wie lange die Temperatur den Schwellwert anhalten muss bevor umgeschaltet wird."
       default: 24
       selector:
         number:
@@ -75,33 +66,21 @@ blueprint:
 
     valve_exercise_enabled:
       name: "Wöchentliche Ventilübung aktivieren"
-      description: >
-        Schaltet die Thermostate einmal pro Woche kurz EIN und wieder AUS.
-        Verhindert das Festsitzen der Thermostatventile über den Sommer.
+      description: "Schaltet die Thermostate einmal pro Woche kurz EIN und wieder AUS um Festsitzen zu verhindern."
       default: true
       selector:
         boolean:
 
     valve_exercise_day:
       name: "Wochentag der Ventilübung"
-      default: "mon"
+      default: 0
       selector:
-        select:
-          options:
-            - label: "Montag"
-              value: "mon"
-            - label: "Dienstag"
-              value: "tue"
-            - label: "Mittwoch"
-              value: "wed"
-            - label: "Donnerstag"
-              value: "thu"
-            - label: "Freitag"
-              value: "fri"
-            - label: "Samstag"
-              value: "sat"
-            - label: "Sonntag"
-              value: "sun"
+        number:
+          min: 0
+          max: 6
+          step: 1
+          mode: box
+          # 0=Montag, 1=Dienstag, 2=Mittwoch, 3=Donnerstag, 4=Freitag, 5=Samstag, 6=Sonntag
 
     valve_exercise_time:
       name: "Uhrzeit der Ventilübung"
@@ -122,8 +101,7 @@ blueprint:
 
     notify_service:
       name: "Benachrichtigungsdienst (optional)"
-      description: >
-        z.B. „notify.telegram". Leer lassen um Benachrichtigungen zu deaktivieren.
+      description: "z.B. notify.telegram. Leer lassen um Benachrichtigungen zu deaktivieren."
       default: ""
       selector:
         text:
@@ -170,7 +148,6 @@ action:
             service: climate.turn_off
             target:
               entity_id: !input climate_targets
-
           - if:
               - condition: template
                 value_template: "{{ notify_service != '' }}"
@@ -188,7 +165,6 @@ action:
             service: climate.turn_on
             target:
               entity_id: !input climate_targets
-
           - if:
               - condition: template
                 value_template: "{{ notify_service != '' }}"
@@ -204,7 +180,7 @@ action:
           - condition: template
             value_template: "{{ valve_exercise_enabled }}"
           - condition: template
-            value_template: "{{ now().strftime('%a').lower() == valve_exercise_day }}"
+            value_template: "{{ now().isoweekday() % 7 == valve_exercise_day | int }}"
           - condition: numeric_state
             entity_id: !input outdoor_temp_sensor
             above: !input summer_on_threshold
@@ -213,10 +189,8 @@ action:
             service: climate.turn_on
             target:
               entity_id: !input climate_targets
-
           - delay:
               minutes: "{{ valve_exercise_duration }}"
-
           - alias: "Ventile wieder ausschalten"
             service: climate.turn_off
             target:
