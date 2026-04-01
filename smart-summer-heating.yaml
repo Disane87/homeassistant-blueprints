@@ -1,0 +1,223 @@
+blueprint:
+  name: "🌞 Heizung Sommermodus (Smart)"
+  description: >
+    Schaltet Thermostate automatisch AUS wenn die Außentemperatur dauerhaft
+    über einem Schwellwert bleibt – und wieder EIN im Herbst. Das normale
+    Heizprogramm läuft danach unverändert weiter. Verwendet Hysterese um
+    Flapping zu verhindern. Thermostate werden dynamisch über Bereich,
+    Gerät oder Entität ausgewählt. Optional: wöchentliche Ventilübung.
+  domain: automation
+  author: "marco@disane.dev"
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+
+    outdoor_temp_sensor:
+      name: "Außentemperatursensor"
+      description: >
+        Sensor der die aktuelle Außentemperatur liefert.
+      selector:
+        entity:
+          domain: sensor
+
+
+    climate_targets:
+      name: "Thermostate"
+      description: >
+        Wähle alle Thermostate aus die im Sommer aus- bzw. eingeschaltet werden sollen.
+        Mehrfachauswahl möglich.
+      selector:
+        entity:
+          domain: climate
+          multiple: true
+
+    summer_on_threshold:
+      name: "Einschalt-Schwellwert Sommermodus"
+      description: "Außentemperatur ab der die Thermostate ausgeschaltet werden."
+      default: 15
+      selector:
+        number:
+          min: 10
+          max: 25
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    summer_off_threshold:
+      name: "Ausschalt-Schwellwert (Hysterese)"
+      description: >
+        Außentemperatur unter der die Thermostate wieder eingeschaltet werden.
+        Muss niedriger sein als der Einschalt-Schwellwert.
+      default: 12
+      selector:
+        number:
+          min: 5
+          max: 20
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    confirmation_hours:
+      name: "Bestätigungsdauer (Stunden)"
+      description: >
+        Wie lange die Temperatur den Schwellwert kontinuierlich über- bzw.
+        unterschreiten muss bevor umgeschaltet wird.
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 72
+          step: 1
+          unit_of_measurement: "h"
+          mode: box
+
+    valve_exercise_enabled:
+      name: "Wöchentliche Ventilübung aktivieren"
+      description: >
+        Schaltet die Thermostate einmal pro Woche kurz EIN und wieder AUS.
+        Verhindert das Festsitzen der Thermostatventile über den Sommer.
+      default: true
+      selector:
+        boolean:
+
+    valve_exercise_day:
+      name: "Wochentag der Ventilübung"
+      default: "mon"
+      selector:
+        select:
+          options:
+            - label: "Montag"
+              value: "mon"
+            - label: "Dienstag"
+              value: "tue"
+            - label: "Mittwoch"
+              value: "wed"
+            - label: "Donnerstag"
+              value: "thu"
+            - label: "Freitag"
+              value: "fri"
+            - label: "Samstag"
+              value: "sat"
+            - label: "Sonntag"
+              value: "sun"
+
+    valve_exercise_time:
+      name: "Uhrzeit der Ventilübung"
+      default: "10:00:00"
+      selector:
+        time:
+
+    valve_exercise_duration:
+      name: "Dauer der Ventilübung (Minuten)"
+      default: 10
+      selector:
+        number:
+          min: 2
+          max: 30
+          step: 1
+          unit_of_measurement: "min"
+          mode: box
+
+    notify_service:
+      name: "Benachrichtigungsdienst (optional)"
+      description: >
+        z.B. „notify.telegram". Leer lassen um Benachrichtigungen zu deaktivieren.
+      default: ""
+      selector:
+        text:
+
+variables:
+  notify_service: !input notify_service
+  valve_exercise_enabled: !input valve_exercise_enabled
+  valve_exercise_day: !input valve_exercise_day
+  valve_exercise_duration: !input valve_exercise_duration
+  outdoor_temp_sensor: !input outdoor_temp_sensor
+  summer_on_threshold: !input summer_on_threshold
+
+mode: single
+max_exceeded: silent
+
+trigger:
+
+  - platform: numeric_state
+    id: "sommer_an"
+    entity_id: !input outdoor_temp_sensor
+    above: !input summer_on_threshold
+    for:
+      hours: !input confirmation_hours
+
+  - platform: numeric_state
+    id: "sommer_aus"
+    entity_id: !input outdoor_temp_sensor
+    below: !input summer_off_threshold
+    for:
+      hours: !input confirmation_hours
+
+  - platform: time
+    id: "ventil_uebung"
+    at: !input valve_exercise_time
+
+action:
+  - choose:
+
+      - conditions:
+          - condition: trigger
+            id: "sommer_an"
+        sequence:
+          - alias: "Alle Thermostate ausschalten"
+            service: climate.turn_off
+            target:
+              entity_id: !input climate_targets
+
+          - if:
+              - condition: template
+                value_template: "{{ notify_service != '' }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "🌞 Sommermodus aktiv"
+                  message: "Thermostate wurden ausgeschaltet."
+
+      - conditions:
+          - condition: trigger
+            id: "sommer_aus"
+        sequence:
+          - alias: "Alle Thermostate einschalten"
+            service: climate.turn_on
+            target:
+              entity_id: !input climate_targets
+
+          - if:
+              - condition: template
+                value_template: "{{ notify_service != '' }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "🍂 Heizsaison beginnt"
+                  message: "Thermostate wurden wieder eingeschaltet."
+
+      - conditions:
+          - condition: trigger
+            id: "ventil_uebung"
+          - condition: template
+            value_template: "{{ valve_exercise_enabled }}"
+          - condition: time
+            weekday:
+              - "{{ valve_exercise_day }}"
+          - condition: numeric_state
+            entity_id: !input outdoor_temp_sensor
+            above: !input summer_on_threshold
+        sequence:
+          - alias: "Ventile kurz einschalten"
+            service: climate.turn_on
+            target:
+              entity_id: !input climate_targets
+
+          - delay:
+              minutes: "{{ valve_exercise_duration }}"
+
+          - alias: "Ventile wieder ausschalten"
+            service: climate.turn_off
+            target:
+              entity_id: !input climate_targets
