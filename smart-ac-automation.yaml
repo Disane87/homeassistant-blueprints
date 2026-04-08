@@ -1,0 +1,879 @@
+blueprint:
+  name: "Klimaanlage Automatisierung — vollständig"
+  description: >
+    Steuert eine Klimaanlage vollautomatisch:
+    • Trigger-Sensor (z. B. Außentemp.) für generelles Ein-/Ausschalten
+    • Raumkühlung auf eine Zieltemperatur mit eigenem Raumsensor
+    • Fenstersperre: AC aus wenn Fenster auf
+    • Heizungssperre: AC nie gleichzeitig mit Heizung
+    • Zeitfenster: AC läuft nur zu definierten Uhrzeiten
+    • Anwesenheitserkennung: höhere Schwellen / Abwesenheitsmodus
+    • Sicherheitsabschaltung nach maximaler Laufzeit
+    • Push-Benachrichtigungen (optional)
+  domain: automation
+  author: "Voxnull / Marco"
+  input:
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # KLIMAANLAGE
+    # ═══════════════════════════════════════════════════════════════════════════
+    climate_entity:
+      name: "Klimaanlage"
+      description: "Die zu steuernde Klimaanlage (climate.*)"
+      selector:
+        entity:
+          domain: climate
+
+    ac_hvac_mode:
+      name: "HVAC-Modus beim Einschalten"
+      description: "Welcher Modus beim allgemeinen Einschalten gesetzt wird"
+      default: "cool"
+      selector:
+        select:
+          options:
+            - label: "Kühlen (cool)"
+              value: "cool"
+            - label: "Lüften (fan_only)"
+              value: "fan_only"
+            - label: "Entfeuchten (dry)"
+              value: "dry"
+            - label: "Auto (heat_cool)"
+              value: "heat_cool"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TRIGGER-SENSOR (Außen- oder allgemeine Raumtemperatur)
+    # ═══════════════════════════════════════════════════════════════════════════
+    temperature_sensor:
+      name: "Trigger-Temperatursensor"
+      description: >
+        Sensor für die allgemeine Ein-/Ausschalt-Entscheidung
+        (z. B. Außentemperatur oder Dachboden). Die AC wird eingeschaltet,
+        wenn dieser Sensor die Einschaltschwelle überschreitet.
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    temp_on_threshold:
+      name: "Einschalt-Temperatur"
+      description: "AC einschalten wenn dieser Wert überschritten wird"
+      default: 26
+      selector:
+        number:
+          min: 15
+          max: 45
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    temp_hysteresis:
+      name: "Hysterese (Trigger-Sensor)"
+      description: >
+        AC schaltet erst aus wenn der Trigger-Sensor unter
+        (Einschalt-Temp − Hysterese) fällt. Verhindert häufiges Takten.
+      default: 2
+      selector:
+        number:
+          min: 0.5
+          max: 5
+          step: 0.5
+          unit_of_measurement: "K"
+          mode: slider
+
+    ac_temperature_fallback:
+      name: "Zieltemperatur AC (Fallback ohne Raumsensor)"
+      description: >
+        Wird als Sollwert am AC-Gerät gesetzt, wenn kein Raumsensor
+        konfiguriert ist. Ohne Wirkung wenn Raumkühlung aktiv ist.
+      default: 22
+      selector:
+        number:
+          min: 16
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    delay_on:
+      name: "Einschaltverzögerung Trigger-Sensor (Minuten)"
+      description: "Wartezeit nach Überschreiten der Trigger-Schwelle"
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    delay_off:
+      name: "Ausschaltverzögerung Trigger-Sensor (Minuten)"
+      description: "Wartezeit nach Unterschreiten der Trigger-Ausschaltschwelle"
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # AUTOMATISCHE RAUMKÜHLUNG AUF ZIELTEMPERATUR
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_room_cooling:
+      name: "Automatische Raumkühlung aktivieren?"
+      description: >
+        Überwacht die Raumtemperatur und kühlt automatisch auf eine
+        Zieltemperatur. Die AC geht an wenn der Raum zu warm wird und
+        wieder aus sobald die Zieltemperatur erreicht ist.
+      default: true
+      selector:
+        boolean:
+
+    room_temperature_sensor:
+      name: "Raumtemperatursensor"
+      description: >
+        Sensor im Zimmer (z. B. Zigbee-Sensor, interner AC-Sensor).
+        Pflicht wenn Raumkühlung aktiv ist.
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    room_cool_above:
+      name: "Raumkühlung: Einschalt-Temperatur"
+      description: >
+        AC startet wenn die Raumtemperatur diesen Wert übersteigt.
+        Tipp: Etwas über der Wohlfühltemperatur, z. B. 25 °C.
+      default: 25
+      selector:
+        number:
+          min: 16
+          max: 35
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    room_cool_to:
+      name: "Raumkühlung: Zieltemperatur (kühlen auf …)"
+      description: >
+        Auf diese Temperatur soll der Raum gekühlt werden.
+        AC schaltet ab sobald die Raumtemperatur diesen Wert erreicht.
+        Muss niedriger sein als die Einschalt-Temperatur.
+      default: 22
+      selector:
+        number:
+          min: 16
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    room_cool_hysteresis:
+      name: "Raumkühlung: Hysterese"
+      description: >
+        AC schaltet erst wieder ein wenn die Raumtemperatur über
+        (Zieltemperatur + Hysterese) steigt. Verhindert häufiges Takten.
+      default: 1
+      selector:
+        number:
+          min: 0.5
+          max: 4
+          step: 0.5
+          unit_of_measurement: "K"
+          mode: slider
+
+    room_cool_delay_on:
+      name: "Raumkühlung: Einschaltverzögerung (Minuten)"
+      description: "Wartezeit bevor die AC für Raumkühlung einschaltet"
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 15
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    room_cool_delay_off:
+      name: "Raumkühlung: Ausschaltverzögerung (Minuten)"
+      description: >
+        Wartezeit nach Erreichen der Zieltemperatur bevor die AC ausschaltet.
+        Verhindert vorzeitiges Abschalten durch kurze Schwankungen.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 15
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # FENSTERSPERRE
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_window_sensor:
+      name: "Fenstersperre aktivieren?"
+      description: "AC wird gestoppt und nicht gestartet wenn das Fenster geöffnet ist"
+      default: false
+      selector:
+        boolean:
+
+    window_sensor:
+      name: "Fenstersensor"
+      description: "binary_sensor.* — nur relevant wenn Fenstersperre aktiv"
+      default: {}
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - window
+            - door
+            - opening
+
+    window_open_delay:
+      name: "Fenstersperre: Verzögerung zum Ausschalten (Minuten)"
+      description: >
+        Wie lange das Fenster geöffnet sein muss bevor die AC ausschaltet.
+        Verhindert Abschalten beim kurzen Lüften.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 15
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    window_reactivate_delay:
+      name: "Fenstersperre: Verzögerung zum Wiedereinschalten (Minuten)"
+      description: "Wartezeit nach Schließen des Fensters bevor die AC wieder startet"
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 15
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HEIZUNGSSPERRE
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_heating_interlock:
+      name: "Heizungssperre aktivieren?"
+      description: "AC wird nicht betrieben solange die Heizung aktiv ist"
+      default: true
+      selector:
+        boolean:
+
+    heating_entity:
+      name: "Heizungsgerät"
+      description: >
+        climate.*, switch.* oder binary_sensor.* der Heizung.
+        Bei climate.*: gilt als aktiv wenn hvac_action = 'heating'.
+        Bei switch.*/binary_sensor.*: gilt als aktiv wenn Zustand 'on' ist.
+      default: {}
+      selector:
+        entity:
+          domain:
+            - climate
+            - switch
+            - binary_sensor
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ZEITFENSTER
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_time_window:
+      name: "Zeitfenster aktivieren?"
+      description: >
+        AC darf nur innerhalb eines definierten Zeitfensters einschalten.
+        Außerhalb des Zeitfensters wird sie automatisch ausgeschaltet.
+      default: false
+      selector:
+        boolean:
+
+    time_window_start:
+      name: "Zeitfenster: Startzeit"
+      description: "Früheste Uhrzeit an der die AC einschalten darf"
+      default: "07:00:00"
+      selector:
+        time:
+
+    time_window_end:
+      name: "Zeitfenster: Endzeit"
+      description: "Uhrzeit ab der die AC nicht mehr einschalten darf (läuft bei Erreichen aus)"
+      default: "23:00:00"
+      selector:
+        time:
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ANWESENHEITSERKENNUNG
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_presence:
+      name: "Anwesenheitserkennung aktivieren?"
+      description: >
+        Im Abwesenheitsmodus gelten höhere Schwellen oder die AC wird
+        komplett gesperrt.
+      default: false
+      selector:
+        boolean:
+
+    presence_entity:
+      name: "Anwesenheitssensor / Person"
+      description: >
+        person.*, device_tracker.* oder binary_sensor.*.
+        Mehrere Personen: vorher in einem Gruppen-Helper zusammenfassen.
+      default: {}
+      selector:
+        entity:
+          domain:
+            - person
+            - device_tracker
+            - binary_sensor
+            - group
+
+    presence_mode:
+      name: "Abwesenheitsmodus"
+      description: >
+        'Gesperrt': AC komplett aus wenn niemand zuhause.
+        'Höhere Schwelle': AC läuft nur wenn es wirklich zu heiß wird
+        (Geräteschutz, Pflanzen, Haustiere).
+      default: "off"
+      selector:
+        select:
+          options:
+            - label: "AC komplett gesperrt"
+              value: "off"
+            - label: "Höhere Temperaturschwelle"
+              value: "threshold"
+
+    presence_away_threshold:
+      name: "Abwesenheit: Einschalt-Temperatur"
+      description: >
+        Nur bei Modus 'Höhere Schwelle'. AC schaltet erst bei dieser Temperatur
+        ein wenn niemand zuhause ist. Z. B. 30 °C zum Schutz von Geräten.
+      default: 30
+      selector:
+        number:
+          min: 20
+          max: 45
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SICHERHEITSABSCHALTUNG
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_max_runtime:
+      name: "Sicherheitsabschaltung (maximale Laufzeit) aktivieren?"
+      description: >
+        Schaltet die AC nach einer maximalen Laufzeit automatisch ab.
+        Schutz gegen endlosen Betrieb bei defektem Sensor oder Hänger.
+      default: true
+      selector:
+        boolean:
+
+    max_runtime_hours:
+      name: "Maximale Laufzeit (Stunden)"
+      description: >
+        Wie lange die AC maximal ohne Unterbrechung laufen darf.
+        Nach Ablauf wird sie abgeschaltet; beim nächsten Temperatur-Trigger
+        kann sie wieder einschalten.
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 12
+          step: 0.5
+          unit_of_measurement: "h"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # BENACHRICHTIGUNGEN
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_notifications:
+      name: "Benachrichtigungen aktivieren?"
+      description: "Sendet Push-Benachrichtigungen bei relevanten Ereignissen"
+      default: false
+      selector:
+        boolean:
+
+    notify_target:
+      name: "Benachrichtigungsdienst"
+      description: "z. B. notify.mobile_app_iphone oder notify.telegram"
+      default: "notify.notify"
+      selector:
+        text:
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLEN — zentrale Berechnung aller Zustände
+# ─────────────────────────────────────────────────────────────────────────────
+variables:
+  # Trigger-Sensor: Ausschaltschwelle = Einschalt minus Hysterese
+  temp_off_threshold: >
+    {{ (temp_on_threshold | float) - (temp_hysteresis | float) }}
+
+  # Aktuelle Temperaturen
+  trigger_temp_now: >
+    {{ states(temperature_sensor) | float(0) }}
+  room_temp_now: >
+    {% if use_room_cooling and room_temperature_sensor != {} %}
+      {{ states(room_temperature_sensor) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+
+  # Raumkühlung: Wiedereinschaltschwelle = Zieltemp + Hysterese
+  room_cool_on_threshold: >
+    {{ (room_cool_to | float) + (room_cool_hysteresis | float) }}
+
+  # Zieltemperatur am AC-Gerät: Raumsensor hat Vorrang vor Fallback
+  effective_ac_target: >
+    {% if use_room_cooling and room_temperature_sensor != {} %}
+      {{ room_cool_to }}
+    {% else %}
+      {{ ac_temperature_fallback }}
+    {% endif %}
+
+  # Fensterstatus
+  window_is_open: >
+    {% if use_window_sensor and window_sensor != {} %}
+      {{ is_state(window_sensor, 'on') }}
+    {% else %}
+      false
+    {% endif %}
+
+  # Heizbetrieb aktiv?
+  heating_is_active: >
+    {% if use_heating_interlock and heating_entity != {} %}
+      {% if states[heating_entity].domain == 'climate' %}
+        {{ state_attr(heating_entity, 'hvac_action') == 'heating' }}
+      {% else %}
+        {{ is_state(heating_entity, 'on') }}
+      {% endif %}
+    {% else %}
+      false
+    {% endif %}
+
+  # Jemand zuhause?
+  someone_home: >
+    {% if use_presence and presence_entity != {} %}
+      {{ states(presence_entity) in ['home', 'on', 'Home'] }}
+    {% else %}
+      true
+    {% endif %}
+
+  # Effektive Einschaltschwelle (berücksichtigt Abwesenheitsmodus)
+  effective_on_threshold: >
+    {% if use_presence and presence_entity != {} and not someone_home %}
+      {% if presence_mode == 'threshold' %}
+        {{ presence_away_threshold | float }}
+      {% else %}
+        9999
+      {% endif %}
+    {% else %}
+      {{ temp_on_threshold | float }}
+    {% endif %}
+
+  # Zeitfenster aktiv?
+  within_time_window: >
+    {% if not use_time_window %}
+      true
+    {% else %}
+      {% set t = now().strftime('%H:%M:%S') %}
+      {{ time_window_start <= t <= time_window_end }}
+    {% endif %}
+
+  # Darf die AC einschalten? (alle Sperren kombiniert)
+  ac_may_start: >
+    {{ not window_is_open
+       and not heating_is_active
+       and within_time_window
+       and (not use_presence
+            or someone_home
+            or presence_mode == 'threshold') }}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGER
+# ─────────────────────────────────────────────────────────────────────────────
+trigger:
+  - platform: state
+    entity_id: !input temperature_sensor
+    id: trigger_temp_change
+
+  - platform: state
+    entity_id: !input room_temperature_sensor
+    id: room_temp_change
+
+  - platform: state
+    entity_id: !input window_sensor
+    to: "on"
+    for:
+      minutes: !input window_open_delay
+    id: window_opened
+
+  - platform: state
+    entity_id: !input window_sensor
+    to: "off"
+    for:
+      minutes: !input window_reactivate_delay
+    id: window_closed
+
+  - platform: state
+    entity_id: !input heating_entity
+    id: heating_changed
+
+  - platform: state
+    entity_id: !input presence_entity
+    id: presence_changed
+
+  - platform: time
+    at: !input time_window_end
+    id: time_window_end_reached
+
+  # Sicherheitsabschaltung: AC läuft seit max_runtime_hours ohne Unterbrechung
+  - platform: state
+    entity_id: !input climate_entity
+    from: "off"
+    for:
+      hours: !input max_runtime_hours
+    id: max_runtime_exceeded
+
+
+condition: []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AKTIONEN
+# ─────────────────────────────────────────────────────────────────────────────
+action:
+  - choose:
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 1 — Fenster geöffnet → AC ausschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: window_opened
+          - condition: template
+            value_template: "{{ use_window_sensor }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+        sequence:
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: "🪟 Fenster geöffnet — Klimaanlage ausgeschaltet."
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 2 — Fenster geschlossen → AC ggf. wieder einschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: window_closed
+          - condition: template
+            value_template: "{{ use_window_sensor }}"
+          - condition: template
+            value_template: "{{ ac_may_start }}"
+          - condition: template
+            value_template: >
+              {{ (use_room_cooling and room_temperature_sensor != {}
+                  and room_temp_now > room_cool_on_threshold | float)
+                 or trigger_temp_now > effective_on_threshold | float }}
+        sequence:
+          - service: climate.set_hvac_mode
+            target:
+              entity_id: !input climate_entity
+            data:
+              hvac_mode: !input ac_hvac_mode
+          - service: climate.set_temperature
+            target:
+              entity_id: !input climate_entity
+            data:
+              temperature: "{{ effective_ac_target }}"
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: "❄️ Fenster geschlossen — Klimaanlage wieder eingeschaltet."
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 3 — Heizung schaltet ein → AC ausschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: heating_changed
+          - condition: template
+            value_template: "{{ use_heating_interlock and heating_is_active }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+        sequence:
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: "🔥 Heizung aktiv — Klimaanlage ausgeschaltet."
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 4 — Person verlässt das Haus → AC abschalten (Modus: gesperrt)
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: presence_changed
+          - condition: template
+            value_template: "{{ use_presence and not someone_home and presence_mode == 'off' }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+        sequence:
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: "🚶 Alle weg — Klimaanlage ausgeschaltet (Abwesenheitsmodus)."
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 5 — Zeitfenster endet → AC ausschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: time_window_end_reached
+          - condition: template
+            value_template: "{{ use_time_window }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+        sequence:
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: >
+                    🕐 Zeitfenster beendet — Klimaanlage ausgeschaltet
+                    ({{ now().strftime('%H:%M') }} Uhr).
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 6 — Sicherheitsabschaltung: maximale Laufzeit überschritten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: max_runtime_exceeded
+          - condition: template
+            value_template: "{{ use_max_runtime }}"
+        sequence:
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: >
+                    ⚠️ Sicherheitsabschaltung — Klimaanlage lief länger als
+                    {{ max_runtime_hours }} h und wurde automatisch ausgeschaltet.
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 7 — Raumkühlung: Raum zu warm → kühlen auf Zieltemperatur
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: room_temp_change
+          - condition: template
+            value_template: "{{ use_room_cooling and room_temperature_sensor != {} }}"
+          # Raumtemperatur über Wiedereinschaltschwelle (Ziel + Hysterese)
+          - condition: template
+            value_template: "{{ room_temp_now > room_cool_on_threshold | float }}"
+          - condition: state
+            entity_id: !input climate_entity
+            state: "off"
+          - condition: template
+            value_template: "{{ ac_may_start }}"
+        sequence:
+          - delay:
+              minutes: !input room_cool_delay_on
+          # Nach Verzögerung nochmals prüfen
+          - condition: template
+            value_template: >
+              {{ states(room_temperature_sensor) | float(0) > room_cool_on_threshold | float
+                 and ac_may_start }}
+          - service: climate.set_hvac_mode
+            target:
+              entity_id: !input climate_entity
+            data:
+              hvac_mode: "cool"
+          - service: climate.set_temperature
+            target:
+              entity_id: !input climate_entity
+            data:
+              temperature: !input room_cool_to
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: >
+                    ❄️ Raumkühlung gestartet — kühle auf {{ room_cool_to }} °C
+                    (aktuell {{ states(room_temperature_sensor) | float | round(1) }} °C).
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 8 — Raumkühlung: Zieltemperatur erreicht → AC ausschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: room_temp_change
+          - condition: template
+            value_template: "{{ use_room_cooling and room_temperature_sensor != {} }}"
+          # Zieltemperatur erreicht oder unterschritten
+          - condition: template
+            value_template: "{{ room_temp_now <= room_cool_to | float }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+        sequence:
+          - delay:
+              minutes: !input room_cool_delay_off
+          # Nach Verzögerung nochmals prüfen
+          - condition: template
+            value_template: >
+              {{ states(room_temperature_sensor) | float(0) <= room_cool_to | float }}
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: >
+                    ✅ Zieltemperatur {{ room_cool_to }} °C erreicht —
+                    Klimaanlage ausgeschaltet
+                    ({{ states(room_temperature_sensor) | float | round(1) }} °C).
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 9 — Trigger-Sensor: Schwelle überschritten → AC einschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: trigger_temp_change
+          - condition: template
+            value_template: "{{ trigger_temp_now > effective_on_threshold | float }}"
+          - condition: state
+            entity_id: !input climate_entity
+            state: "off"
+          - condition: template
+            value_template: "{{ ac_may_start }}"
+        sequence:
+          - delay:
+              minutes: !input delay_on
+          # Nach Verzögerung nochmals prüfen
+          - condition: template
+            value_template: >
+              {{ states(temperature_sensor) | float(0) > effective_on_threshold | float
+                 and ac_may_start }}
+          - service: climate.set_hvac_mode
+            target:
+              entity_id: !input climate_entity
+            data:
+              hvac_mode: !input ac_hvac_mode
+          - service: climate.set_temperature
+            target:
+              entity_id: !input climate_entity
+            data:
+              temperature: "{{ effective_ac_target }}"
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: >
+                    ❄️ Klimaanlage eingeschaltet via Trigger-Sensor
+                    ({{ states(temperature_sensor) | float | round(1) }} °C,
+                    Ziel: {{ effective_ac_target }} °C).
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL 10 — Trigger-Sensor: Schwelle unterschritten → AC ausschalten
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: trigger_temp_change
+          - condition: template
+            value_template: "{{ trigger_temp_now < temp_off_threshold | float }}"
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: !input climate_entity
+                state: "off"
+          # Nicht ausschalten wenn Raumkühlung gerade aktiv gebraucht wird
+          - condition: template
+            value_template: >
+              {{ not (use_room_cooling and room_temperature_sensor != {}
+                      and states(room_temperature_sensor) | float(0) > room_cool_on_threshold | float) }}
+        sequence:
+          - delay:
+              minutes: !input delay_off
+          # Nach Verzögerung nochmals prüfen
+          - condition: template
+            value_template: >
+              {{ states(temperature_sensor) | float(0) < temp_off_threshold | float
+                 and not (use_room_cooling and room_temperature_sensor != {}
+                          and states(room_temperature_sensor) | float(0) > room_cool_on_threshold | float) }}
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ use_notifications }}"
+            then:
+              - service: !input notify_target
+                data:
+                  message: >
+                    ✅ Klimaanlage ausgeschaltet via Trigger-Sensor
+                    ({{ states(temperature_sensor) | float | round(1) }} °C,
+                    Schwelle: {{ temp_off_threshold | round(1) }} °C).
+
+mode: restart
