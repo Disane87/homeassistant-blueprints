@@ -1,26 +1,111 @@
 blueprint:
   name: "💧 Smart Entfeuchten via Klimaanlage (Heat-Cool-Zyklus) [v2.1]"
-  description: >
-    Nutzt eine Split-Klimaanlage zum effektiven Entfeuchten — auch wenn der
-    Raum bereits kühl ist und der normale 'dry'-Modus nichts bringt.
+  description: |
+    # 💧 Smart Entfeuchten via Klimaanlage
 
-    PRINZIP:
-    • Eine Klima entfeuchtet nur wenn der Verdampfer deutlich unter dem
-      Taupunkt liegt UND der Kompressor lange läuft.
-    • Bei kühlem Raum (z. B. 20 °C) schaltet sie im cool/dry-Modus sofort ab
-      → kein Wasser wird ausgeschieden.
-    • Lösung: Raum erst AUFHEIZEN (Delta-T vergrößern), dann AGGRESSIV KÜHLEN
-      → Kompressor läuft lange, Wasser kondensiert am Verdampfer.
-    • Zyklus wiederholt bis rel. Feuchte, absolute Feuchte oder Taupunkt das
-      Ziel erreichen.
+    Hey! 👋 Kennst du das Problem: dein Raum ist schon **kühl** (20 °C) aber
+    die Luftfeuchtigkeit klebt bei **75 %** und der `dry`-Modus deiner
+    Klimaanlage bringt **nichts**? Dieses Blueprint löst das — mit einem
+    smarten Heat-Cool-Zyklus. 🧠❄️
 
-    FEATURES:
-    • Heat-Cool-Zyklus mit einstellbarer Heiz- und Kühltemperatur
-    • Abbruch bei Ziel-rH / Ziel abs. Feuchte / Taupunkt erreicht
-    • Außenvergleich: wenn draußen trockener → nur Lüften empfehlen
-    • Fenstersperre, Zeitfenster, Anwesenheit
-    • Maximale Laufzeit + maximale Anzahl Zyklen als Sicherheit
-    • Push-Benachrichtigungen optional
+    ## 🤔 Warum braucht man das überhaupt?
+
+    Eine Klimaanlage entfeuchtet nur dann wirklich, wenn zwei Dinge
+    gleichzeitig passieren:
+
+    - Der **Verdampfer liegt deutlich unter dem Taupunkt** (sonst kondensiert
+      kein Wasser)
+    - Der **Kompressor läuft lange durch** (Wasser braucht Zeit um abzufließen)
+
+    Bei einem bereits kühlen Raum schaltet die AC im `cool`/`dry`-Modus aber
+    **sofort ab** sobald die Zieltemperatur erreicht ist → **kein Wasser**
+    wird ausgeschieden, die Feuchte bleibt hoch. Frustrierend! 😤
+
+    **Die Lösung:** Raum erst **aufheizen** (Delta-T vergrößern), dann
+    **aggressiv kühlen** → Kompressor läuft minutenlang am Stück, das Wasser
+    kondensiert am Verdampfer und fließt ab. 💦
+
+    ## ✨ Features
+
+    - 🔥 **Heat-Cool-Zyklus** mit einstellbarer Heiz- und Kühltemperatur
+    - 🎯 **Dynamische Abbruchkriterien**: relative Feuchte, **absolute Feuchte
+      (g/m³)** oder Min-Temperatur — was zuerst erreicht wird, gewinnt
+    - 🪟 **Außenvergleich**: wenn draußen trockener ist → empfiehlt
+      Stoßlüften statt Strom zu verheizen (spart Energie! 💚)
+    - ⏰ **Smarter Stoßlüft-Reminder**: wartet nach der Lüft-Empfehlung auf
+      Fenster-Öffnung und benachrichtigt dich **sobald die Feuchte wirklich
+      gefallen ist** — nicht nach starrem Timer!
+    - 🔁 **Bis zu N Zyklen** bevor aufgegeben wird (konfigurierbar)
+    - 📱 **Fortschritts-Notifications** in jeder Phase (Start, Heiz-Ende,
+      Kühl-Ende, Zyklus-Ende, Abschluss)
+    - 🛡️ **Alle üblichen Sperren**: Fenster offen, Zeitfenster, parallele
+      Heizung aktiv
+    - 🌐 **Cloud-AC-freundlich**: `turn_on` + kombiniertes `set_temperature`
+      mit `hvac_mode` + Mode-Bestätigung (getestet mit **Hisense hismart**)
+    - 🔍 **Auto-Erkennung** ob der AC `heat`-Modus unterstützt — falls nicht,
+      wird die Heizphase automatisch übersprungen
+
+    ## 🚀 Quick Start
+
+    **Minimum-Konfiguration** — nur 3 Pflichtfelder:
+
+    1. 🌡️ **Klimaanlage** — deine `climate.*` Entity (sollte `heat` und `cool`
+       unterstützen, sonst wird nur gekühlt)
+    2. 🌡️ **Raum-Temperatursensor** — ein `sensor.*` mit Temperatur im Raum
+    3. 💧 **Raum-Feuchtesensor** — ein `sensor.*` mit rel. Luftfeuchte im Raum
+
+    Der Rest hat sinnvolle Defaults. Du wirst aber wahrscheinlich den
+    **Außenvergleich** aktivieren wollen (braucht zusätzlich Außen-Sensoren) —
+    der spart dir richtig Strom weil Stoßlüften oft die bessere Lösung ist.
+
+    ## 🧪 So läuft's ab
+
+    1. 🔔 **Trigger**: Raumfeuchte steigt über Startschwelle (z. B. 65 %)
+    2. 🚦 **Vorcheck**: Fenster zu? Zeitfenster passend? Keine Heizung aktiv?
+    3. 🪟 **Außenvergleich** *(optional)*: Ist draußen trockener?
+       → "Lieber lüften!" + Smart-Reminder
+    4. 🔁 **Sonst: Heat-Cool-Zyklus startet**
+       - 🔥 Heize auf z. B. 25 °C (Delta-T erzeugen)
+       - ❄️ Kühle aggressiv auf z. B. 18 °C (Kompressor läuft durch,
+         Wasser kondensiert)
+       - Abbruch bei Ziel erreicht ODER Max-Zyklen durch
+    5. ✅ AC aus, finale Status-Notification mit End-Werten
+
+    ## ⚙️ Empfohlene Werte
+
+    | Parameter | Default | Warum dieser Wert? |
+    |---|---|---|
+    | Start rel. Feuchte | **65 %** | Früh genug um zu reagieren, spät genug um nicht ständig zu laufen |
+    | Ziel rel. Feuchte | **55 %** | Wohnraum-Komfortzone (45–60 % ist ideal) |
+    | Ziel abs. Feuchte | **10 g/m³** | Das **ehrlichere** Maß — unabhängig von der Temperatur |
+    | Heiz-Ziel | **24 °C** | Genug Delta-T für ordentliche Kondensation |
+    | Kühl-Ziel | **18 °C** | Aggressiv genug damit der Kompressor durchläuft |
+    | Max. Zyklen | **3** | Nach 3 Durchläufen ist die Luft meistens trocken |
+
+    > 💡 **Pro-Tipp**: Die **absolute Feuchte** (g/m³) ist das bessere Ziel als
+    > die relative Feuchte. Letztere steigt automatisch wenn's kälter wird —
+    > auch wenn tatsächlich weniger Wasser in der Luft ist. Das Blueprint
+    > nutzt beide und nimmt das was zuerst das Ziel erreicht.
+
+    ## 🐛 Debug / "Warum passiert nichts?"
+
+    Das Blueprint schickt Diagnose-Notifications bei jedem relevanten Event:
+
+    - ⏳ *"Warte auf Fenster-Öffnung"* — Vent-Reminder ist aktiv
+    - ⌛ *"Kein Fenster geöffnet"* — Timeout beim Warten
+    - 🔁 *"Zyklus X/Y startet"* — Heat-Cool läuft
+    - ⚠️ *"AC unterstützt kein heat"* — dein AC kann nicht aufheizen, Heizphase
+      wird übersprungen (mit Liste der unterstützten Modi!)
+
+    **Siehst du keine Notifications nach einem Trigger?**
+    → Blueprint wurde wahrscheinlich nicht neu geladen.
+    **Developer Tools → YAML → Reload Blueprints** + Automation einmal neu
+    speichern damit die neuen Input-Defaults gezogen werden.
+
+    ---
+
+    **Made with 💧 by [@Disane87](https://github.com/Disane87)** —
+    [Issues & Feature Requests](https://github.com/Disane87/homeassistant-blueprints/issues)
 
   domain: automation
   author: "marco@disane.dev"
