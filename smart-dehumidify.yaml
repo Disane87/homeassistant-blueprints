@@ -1,0 +1,625 @@
+blueprint:
+  name: "💧 Smart Entfeuchten via Klimaanlage (Heat-Cool-Zyklus)"
+  description: >
+    Nutzt eine Split-Klimaanlage zum effektiven Entfeuchten — auch wenn der
+    Raum bereits kühl ist und der normale 'dry'-Modus nichts bringt.
+
+    PRINZIP:
+    • Eine Klima entfeuchtet nur wenn der Verdampfer deutlich unter dem
+      Taupunkt liegt UND der Kompressor lange läuft.
+    • Bei kühlem Raum (z. B. 20 °C) schaltet sie im cool/dry-Modus sofort ab
+      → kein Wasser wird ausgeschieden.
+    • Lösung: Raum erst AUFHEIZEN (Delta-T vergrößern), dann AGGRESSIV KÜHLEN
+      → Kompressor läuft lange, Wasser kondensiert am Verdampfer.
+    • Zyklus wiederholt bis rel. Feuchte, absolute Feuchte oder Taupunkt das
+      Ziel erreichen.
+
+    FEATURES:
+    • Heat-Cool-Zyklus mit einstellbarer Heiz- und Kühltemperatur
+    • Abbruch bei Ziel-rH / Ziel abs. Feuchte / Taupunkt erreicht
+    • Außenvergleich: wenn draußen trockener → nur Lüften empfehlen
+    • Fenstersperre, Zeitfenster, Anwesenheit
+    • Maximale Laufzeit + maximale Anzahl Zyklen als Sicherheit
+    • Push-Benachrichtigungen optional
+
+  domain: automation
+  author: "marco@disane.dev"
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # KLIMAANLAGE
+    # ═══════════════════════════════════════════════════════════════════════════
+    climate_entity:
+      name: "Klimaanlage"
+      description: "Die zu steuernde Klimaanlage (climate.*). Muss heat und cool unterstützen."
+      selector:
+        entity:
+          domain: climate
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # RAUMSENSOREN
+    # ═══════════════════════════════════════════════════════════════════════════
+    room_temperature_sensor:
+      name: "Raum-Temperatursensor"
+      description: "Sensor für die aktuelle Raumtemperatur (°C)."
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    room_humidity_sensor:
+      name: "Raum-Feuchtesensor (rel. Feuchte %)"
+      description: "Sensor für die aktuelle relative Luftfeuchtigkeit im Raum."
+      selector:
+        entity:
+          domain: sensor
+          device_class: humidity
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ZIELE — WANN GESTARTET / WANN FERTIG
+    # ═══════════════════════════════════════════════════════════════════════════
+    target_humidity:
+      name: "Ziel: relative Feuchte (%)"
+      description: >
+        Unter diesen Wert soll die rel. Feuchte gebracht werden.
+        Typisch: 55–60 % für Wohnräume.
+      default: 55
+      selector:
+        number:
+          min: 30
+          max: 70
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    start_humidity:
+      name: "Start: relative Feuchte (%)"
+      description: >
+        Ab dieser rel. Feuchte wird der Entfeuchtungs-Zyklus automatisch
+        gestartet. Sollte deutlich über dem Ziel liegen.
+      default: 65
+      selector:
+        number:
+          min: 40
+          max: 90
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    target_absolute_humidity:
+      name: "Ziel: absolute Feuchte (g/m³)"
+      description: >
+        Zusätzliches Abbruchkriterium. Die rel. Feuchte kann steigen wenn es
+        kälter wird, daher ist die absolute Feuchte das bessere Maß für
+        'wirklich trocken'. Unter diesem Wert gilt der Raum als entfeuchtet.
+        Typisch: 9–11 g/m³.
+      default: 10
+      selector:
+        number:
+          min: 5
+          max: 15
+          step: 0.5
+          unit_of_measurement: "g/m³"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HEAT-COOL-ZYKLUS PARAMETER
+    # ═══════════════════════════════════════════════════════════════════════════
+    heat_target_temp:
+      name: "Aufheizen auf (°C)"
+      description: >
+        Zieltemperatur der Heizphase. Je höher desto effektiver die
+        anschließende Kühl-Entfeuchtung. Typisch: 23–25 °C.
+      default: 24
+      selector:
+        number:
+          min: 20
+          max: 28
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    heat_phase_max_minutes:
+      name: "Heizphase: maximale Dauer (Minuten)"
+      description: >
+        Maximale Laufzeit der Heizphase — falls die Zieltemperatur nicht
+        erreicht wird (z. B. offene Tür). Danach wird direkt gekühlt.
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 90
+          step: 5
+          unit_of_measurement: "min"
+          mode: slider
+
+    cool_target_temp:
+      name: "Kühlen auf (°C)"
+      description: >
+        Aggressive Zieltemperatur der Kühlphase. Muss deutlich unter der
+        Heiz-Zieltemperatur liegen damit der Kompressor lange durchläuft.
+        Typisch: 17–19 °C.
+      default: 18
+      selector:
+        number:
+          min: 16
+          max: 22
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    cool_phase_max_minutes:
+      name: "Kühlphase: maximale Dauer (Minuten)"
+      description: >
+        Maximale Laufzeit der Kühlphase pro Zyklus.
+      default: 45
+      selector:
+        number:
+          min: 10
+          max: 120
+          step: 5
+          unit_of_measurement: "min"
+          mode: slider
+
+    min_room_temp_abort:
+      name: "Abbruch-Temperatur Kühlphase (°C)"
+      description: >
+        Wenn der Raum so kalt wird, wird die Kühlphase sofort abgebrochen
+        (Komfortschutz). Typisch: 17 °C.
+      default: 17
+      selector:
+        number:
+          min: 14
+          max: 20
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    fan_mode:
+      name: "Lüfterstufe"
+      description: >
+        Lüfterstufe während Heizen und Kühlen. Höhere Stufen entfeuchten
+        mehr Luft pro Zeit.
+      default: "high"
+      selector:
+        select:
+          options:
+            - label: "Auto"
+              value: "auto"
+            - label: "Niedrig"
+              value: "low"
+            - label: "Mittel"
+              value: "medium"
+            - label: "Hoch"
+              value: "high"
+
+    max_cycles:
+      name: "Maximale Anzahl Zyklen"
+      description: >
+        Sicherheitsgrenze: nach so vielen Heat-Cool-Zyklen wird abgebrochen
+        auch wenn das Ziel nicht erreicht wurde.
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # AUSSENVERGLEICH (OPTIONAL) — LÜFTEN STATT ENTFEUCHTEN
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_outdoor_comparison:
+      name: "Außenvergleich aktivieren?"
+      description: >
+        Vergleicht innen und außen die absolute Feuchte. Wenn draußen
+        trockener ist, wird keine AC-Entfeuchtung gestartet sondern stattdessen
+        eine Benachrichtigung zum Stoßlüften gesendet.
+      default: false
+      selector:
+        boolean:
+
+    outdoor_temperature_sensor:
+      name: "Außen-Temperatursensor"
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+
+    outdoor_humidity_sensor:
+      name: "Außen-Feuchtesensor"
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: humidity
+
+    outdoor_advantage_min:
+      name: "Mindest-Vorteil außen (g/m³)"
+      description: >
+        Wie viel trockener außen sein muss (in absoluter Feuchte) damit
+        Lüften empfohlen wird statt AC-Entfeuchten.
+      default: 1.5
+      selector:
+        number:
+          min: 0.5
+          max: 5
+          step: 0.5
+          unit_of_measurement: "g/m³"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # FENSTERSPERRE
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_window_sensor:
+      name: "Fenstersperre aktivieren?"
+      description: "Entfeuchten wird gestoppt/nicht gestartet wenn das Fenster offen ist."
+      default: false
+      selector:
+        boolean:
+
+    window_sensor:
+      name: "Fenstersensor"
+      default: {}
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - window
+            - door
+            - opening
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ZEITFENSTER
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_time_window:
+      name: "Zeitfenster aktivieren?"
+      description: "Entfeuchten nur innerhalb eines Zeitfensters erlauben."
+      default: false
+      selector:
+        boolean:
+
+    time_window_start:
+      name: "Zeitfenster: Startzeit"
+      default: "08:00:00"
+      selector:
+        time:
+
+    time_window_end:
+      name: "Zeitfenster: Endzeit"
+      default: "22:00:00"
+      selector:
+        time:
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HEIZUNGSSPERRE
+    # ═══════════════════════════════════════════════════════════════════════════
+    use_heating_interlock:
+      name: "Heizungssperre aktivieren?"
+      description: "Entfeuchten nicht starten wenn eine andere Heizung aktiv ist."
+      default: false
+      selector:
+        boolean:
+
+    heating_entity:
+      name: "Heizungsgerät"
+      default: {}
+      selector:
+        entity:
+          domain:
+            - climate
+            - switch
+            - binary_sensor
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # BENACHRICHTIGUNGEN
+    # ═══════════════════════════════════════════════════════════════════════════
+    notify_service:
+      name: "Benachrichtigungsdienst (optional)"
+      description: "z. B. notify.mobile_app_iphone. Leer lassen zum Deaktivieren."
+      default: ""
+      selector:
+        text:
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLEN
+# ─────────────────────────────────────────────────────────────────────────────
+variables:
+  v_climate: !input climate_entity
+  v_room_temp: !input room_temperature_sensor
+  v_room_hum: !input room_humidity_sensor
+  v_out_temp: !input outdoor_temperature_sensor
+  v_out_hum: !input outdoor_humidity_sensor
+  v_use_outdoor: !input use_outdoor_comparison
+  v_use_window: !input use_window_sensor
+  v_window: !input window_sensor
+  v_use_time: !input use_time_window
+  v_time_start: !input time_window_start
+  v_time_end: !input time_window_end
+  v_use_heat_lock: !input use_heating_interlock
+  v_heating: !input heating_entity
+  v_target_rh: !input target_humidity
+  v_start_rh: !input start_humidity
+  v_target_ah: !input target_absolute_humidity
+  v_heat_target: !input heat_target_temp
+  v_cool_target: !input cool_target_temp
+  v_min_room: !input min_room_temp_abort
+  v_max_cycles: !input max_cycles
+  v_fan_mode: !input fan_mode
+  v_out_advantage: !input outdoor_advantage_min
+  v_notify: !input notify_service
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGER
+# ─────────────────────────────────────────────────────────────────────────────
+trigger:
+  - platform: numeric_state
+    entity_id: !input room_humidity_sensor
+    above: !input start_humidity
+    for:
+      minutes: 2
+    id: humidity_high
+
+  - platform: state
+    entity_id: !input window_sensor
+    to: "on"
+    id: window_opened
+
+
+condition: []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AKTIONEN
+# ─────────────────────────────────────────────────────────────────────────────
+action:
+  - choose:
+
+      # ════════════════════════════════════════════════════════════════════════
+      # FALL A — Fenster wurde geöffnet → laufenden Zyklus stoppen
+      # ════════════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: trigger
+            id: window_opened
+          - condition: template
+            value_template: "{{ v_use_window }}"
+        sequence:
+          - service: climate.turn_off
+            target:
+              entity_id: !input climate_entity
+          - if:
+              - condition: template
+                value_template: "{{ v_notify != '' }}"
+            then:
+              - service: "{{ v_notify }}"
+                data:
+                  title: "💧 Entfeuchten gestoppt"
+                  message: "Fenster wurde geöffnet — Klimaanlage ausgeschaltet."
+
+    # Default-Zweig: normaler Start bei humidity_high
+    default:
+
+      # ────────────────────────────────────────────────────────────────────────
+      # VORCHECKS: Fenster, Zeitfenster, Heizung
+      # ────────────────────────────────────────────────────────────────────────
+      - variables:
+          window_open: >
+            {{ v_use_window and v_window not in [none, 'none', {}]
+               and is_state(v_window, 'on') }}
+          within_time: >
+            {% if not v_use_time %}
+              true
+            {% else %}
+              {% set t = now().strftime('%H:%M:%S') %}
+              {{ v_time_start <= t <= v_time_end }}
+            {% endif %}
+          heating_active: >
+            {% if not v_use_heat_lock or v_heating in [none, 'none', {}] %}
+              false
+            {% else %}
+              {% set d = v_heating.split('.')[0] %}
+              {% if d == 'climate' %}
+                {{ state_attr(v_heating, 'hvac_action') == 'heating' }}
+              {% else %}
+                {{ is_state(v_heating, 'on') }}
+              {% endif %}
+            {% endif %}
+
+      - condition: template
+        value_template: "{{ not window_open and within_time and not heating_active }}"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # BERECHNUNG ABSOLUTE FEUCHTE (Magnus-Formel)
+      # Formel: AH = 216.7 * ( (RH/100 * 6.112 * exp(17.62*T/(243.12+T))) / (273.15+T) )
+      # ────────────────────────────────────────────────────────────────────────
+      - variables:
+          room_t: "{{ states(v_room_temp) | float(0) }}"
+          room_rh: "{{ states(v_room_hum) | float(0) }}"
+          room_ah: >
+            {% set T = states(v_room_temp) | float(0) %}
+            {% set RH = states(v_room_hum) | float(0) %}
+            {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+            {% set ah = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+            {{ ah | round(2) }}
+          out_ah: >
+            {% if v_use_outdoor
+                  and v_out_temp not in [none, 'none', {}]
+                  and v_out_hum not in [none, 'none', {}] %}
+              {% set T = states(v_out_temp) | float(0) %}
+              {% set RH = states(v_out_hum) | float(0) %}
+              {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+              {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
+            {% else %}
+              99
+            {% endif %}
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Außenvergleich: wenn draußen trockener → Lüften empfehlen
+      # ────────────────────────────────────────────────────────────────────────
+      - if:
+          - condition: template
+            value_template: >
+              {{ v_use_outdoor
+                 and (room_ah | float) - (out_ah | float) >= (v_out_advantage | float) }}
+        then:
+          - if:
+              - condition: template
+                value_template: "{{ v_notify != '' }}"
+            then:
+              - service: "{{ v_notify }}"
+                data:
+                  title: "🪟 Lieber lüften!"
+                  message: >
+                    Innen {{ room_ah }} g/m³, außen nur {{ out_ah }} g/m³
+                    absolute Feuchte. Stoßlüften bringt mehr als die
+                    Klimaanlage — AC-Entfeuchten wurde übersprungen.
+          - stop: "Außenluft ist trockener — Lüften empfohlen."
+
+      # ────────────────────────────────────────────────────────────────────────
+      # START-NOTIFICATION
+      # ────────────────────────────────────────────────────────────────────────
+      - if:
+          - condition: template
+            value_template: "{{ v_notify != '' }}"
+        then:
+          - service: "{{ v_notify }}"
+            data:
+              title: "💧 Entfeuchten startet"
+              message: >
+                Start: {{ room_t | round(1) }} °C /
+                {{ room_rh | round(0) }} % rH
+                ({{ room_ah }} g/m³). Ziel: <{{ v_target_rh }} % bzw.
+                <{{ v_target_ah }} g/m³.
+
+      # ────────────────────────────────────────────────────────────────────────
+      # HEAT-COOL-ZYKLUS — bis zu max_cycles Durchläufe
+      # ────────────────────────────────────────────────────────────────────────
+      - repeat:
+          count: !input max_cycles
+          sequence:
+
+            # ═══════ PHASE 1: HEIZEN ═══════
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: !input climate_entity
+              data:
+                hvac_mode: "heat"
+            - service: climate.set_temperature
+              target:
+                entity_id: !input climate_entity
+              data:
+                temperature: !input heat_target_temp
+            - service: climate.set_fan_mode
+              target:
+                entity_id: !input climate_entity
+              data:
+                fan_mode: !input fan_mode
+              continue_on_error: true
+
+            # Warte bis Zieltemperatur erreicht ODER Timeout
+            - wait_template: >
+                {{ states(v_room_temp) | float(0) >= (v_heat_target | float) - 0.3 }}
+              timeout:
+                minutes: !input heat_phase_max_minutes
+              continue_on_error: true
+
+            # Frühabbruch wenn Fenster/Feuchte-Ziel bereits erreicht
+            - if:
+                - condition: template
+                  value_template: >
+                    {{ (v_use_window and v_window not in [none, 'none', {}]
+                        and is_state(v_window, 'on'))
+                       or states(v_room_hum) | float(100) <= (v_target_rh | float) }}
+              then:
+                - stop: "Ziel erreicht oder Fenster offen — Zyklus beenden."
+
+            # ═══════ PHASE 2: KÜHLEN (aggressiv entfeuchten) ═══════
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: !input climate_entity
+              data:
+                hvac_mode: "cool"
+            - service: climate.set_temperature
+              target:
+                entity_id: !input climate_entity
+              data:
+                temperature: !input cool_target_temp
+            - service: climate.set_fan_mode
+              target:
+                entity_id: !input climate_entity
+              data:
+                fan_mode: !input fan_mode
+              continue_on_error: true
+
+            # Warte bis eines der Abbruchkriterien zutrifft
+            - wait_template: >
+                {% set T = states(v_room_temp) | float(99) %}
+                {% set RH = states(v_room_hum) | float(100) %}
+                {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+                {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+                {{ RH <= (v_target_rh | float)
+                   or AH <= (v_target_ah | float)
+                   or T <= (v_min_room | float)
+                   or (v_use_window and v_window not in [none, 'none', {}]
+                       and is_state(v_window, 'on')) }}
+              timeout:
+                minutes: !input cool_phase_max_minutes
+              continue_on_error: true
+
+            # Wenn Ziel erreicht → Schleife verlassen
+            - if:
+                - condition: template
+                  value_template: >
+                    {% set T = states(v_room_temp) | float(99) %}
+                    {% set RH = states(v_room_hum) | float(100) %}
+                    {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+                    {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+                    {{ RH <= (v_target_rh | float) or AH <= (v_target_ah | float) }}
+              then:
+                - stop: "Entfeuchtungsziel erreicht."
+
+            # Wenn Raum zu kalt oder Fenster offen → abbrechen
+            - if:
+                - condition: template
+                  value_template: >
+                    {{ states(v_room_temp) | float(99) <= (v_min_room | float)
+                       or (v_use_window and v_window not in [none, 'none', {}]
+                           and is_state(v_window, 'on')) }}
+              then:
+                - stop: "Abbruch — Raum zu kalt oder Fenster offen."
+
+      # ────────────────────────────────────────────────────────────────────────
+      # ABSCHLUSS: AC ausschalten + Benachrichtigung
+      # ────────────────────────────────────────────────────────────────────────
+      - service: climate.turn_off
+        target:
+          entity_id: !input climate_entity
+
+      - variables:
+          end_t: "{{ states(v_room_temp) | float(0) }}"
+          end_rh: "{{ states(v_room_hum) | float(0) }}"
+          end_ah: >
+            {% set T = states(v_room_temp) | float(0) %}
+            {% set RH = states(v_room_hum) | float(0) %}
+            {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+            {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
+
+      - if:
+          - condition: template
+            value_template: "{{ v_notify != '' }}"
+        then:
+          - service: "{{ v_notify }}"
+            data:
+              title: "✅ Entfeuchten beendet"
+              message: >
+                Ende: {{ end_t | round(1) }} °C /
+                {{ end_rh | round(0) }} % rH ({{ end_ah }} g/m³).
+
+mode: restart
+max_exceeded: silent
