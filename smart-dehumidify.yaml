@@ -571,6 +571,24 @@ action:
                 Stoßlüften bringt mehr als die Klimaanlage — AC-Entfeuchten
                 wurde übersprungen.
 
+      # Diagnose: zeigt unconditional die Werte die den Vent-Reminder-Check beeinflussen
+      - if:
+          - condition: template
+            value_template: "{{ v_notify != '' }}"
+        then:
+          - service: "{{ v_notify }}"
+            data:
+              title: "🔬 Vent-Reminder Diagnose"
+              message: >
+                vent_reminder_enabled = {{ v_vent_reminder }}
+                (bool: {{ v_vent_reminder | bool(false) }}),
+                window_sensor = '{{ v_window }}'
+                (is_string: {{ v_window is string }},
+                length: {{ v_window | string | length }}),
+                Check-Ergebnis: {{ v_vent_reminder | bool(false)
+                                   and (v_window is string)
+                                   and (v_window | length > 0) }}.
+
       # Stoßlüft-Reminder: nur wenn aktiviert UND Fenstersensor konfiguriert
       - if:
           - condition: template
