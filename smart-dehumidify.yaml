@@ -563,6 +563,7 @@ action:
             value_template: "{{ v_notify != '' }}"
         then:
           - service: "{{ v_notify }}"
+            continue_on_error: true
             data:
               title: "🪟 Lieber lüften!"
               message: >
@@ -577,6 +578,7 @@ action:
             value_template: "{{ v_notify != '' }}"
         then:
           - service: "{{ v_notify }}"
+            continue_on_error: true
             data:
               title: "🔬 Vent-Reminder Diagnose"
               message: >
@@ -602,6 +604,7 @@ action:
                 value_template: "{{ v_notify != '' }}"
             then:
               - service: "{{ v_notify }}"
+                continue_on_error: true
                 data:
                   title: "⏳ Warte auf Fenster-Öffnung"
                   message: >
@@ -626,6 +629,7 @@ action:
                     value_template: "{{ v_notify != '' }}"
                 then:
                   - service: "{{ v_notify }}"
+                    continue_on_error: true
                     data:
                       title: "🪟 Lüften gestartet"
                       message: >
@@ -640,6 +644,7 @@ action:
                     value_template: "{{ v_notify != '' }}"
                 then:
                   - service: "{{ v_notify }}"
+                    continue_on_error: true
                     data:
                       title: "⌛ Kein Fenster geöffnet"
                       message: >
@@ -690,6 +695,7 @@ action:
                             value_template: "{{ vent_target_reached | bool(false) }}"
                         sequence:
                           - service: "{{ v_notify }}"
+                            continue_on_error: true
                             data:
                               title: "✅ Lüft-Ziel erreicht — Fenster schließen"
                               message: >
@@ -703,6 +709,7 @@ action:
                             value_template: "{{ vent_window_closed | bool(false) }}"
                         sequence:
                           - service: "{{ v_notify }}"
+                            continue_on_error: true
                             data:
                               title: "🪟 Fenster geschlossen"
                               message: >
@@ -714,6 +721,7 @@ action:
                     # Fallback: Timeout erreicht, Fenster noch offen, Ziel nicht erreicht
                     default:
                       - service: "{{ v_notify }}"
+                        continue_on_error: true
                         data:
                           title: "⏰ {{ v_vent_duration }} min gelüftet"
                           message: >
@@ -733,6 +741,7 @@ action:
         value_template: "{{ v_notify != '' }}"
     then:
       - service: "{{ v_notify }}"
+        continue_on_error: true
         data:
           title: "💧 Entfeuchten startet"
           message: >
@@ -760,6 +769,7 @@ action:
               value_template: "{{ v_notify != '' }}"
           then:
             - service: "{{ v_notify }}"
+              continue_on_error: true
               data:
                 title: "🔁 Zyklus {{ cycle_num }}/{{ v_max_cycles }} startet"
                 message: >
@@ -821,6 +831,7 @@ action:
                   value_template: "{{ v_notify != '' }}"
               then:
                 - service: "{{ v_notify }}"
+                  continue_on_error: true
                   data:
                     title: "🔥 Heizphase beendet"
                     message: >
@@ -891,6 +902,7 @@ action:
               value_template: "{{ v_notify != '' }}"
           then:
             - service: "{{ v_notify }}"
+              continue_on_error: true
               data:
                 title: "❄️ Zyklus {{ cycle_num }}/{{ v_max_cycles }} Kühlphase beendet"
                 message: >
@@ -947,6 +959,7 @@ action:
         value_template: "{{ v_notify != '' }}"
     then:
       - service: "{{ v_notify }}"
+        continue_on_error: true
         data:
           title: "✅ Entfeuchten beendet"
           message: >
