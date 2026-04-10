@@ -1,5 +1,5 @@
 blueprint:
-  name: "💧 Smart Entfeuchten via Klimaanlage (Heat-Cool-Zyklus)"
+  name: "💧 Smart Entfeuchten via Klimaanlage (Heat-Cool-Zyklus) [v2.1]"
   description: >
     Nutzt eine Split-Klimaanlage zum effektiven Entfeuchten — auch wenn der
     Raum bereits kühl ist und der normale 'dry'-Modus nichts bringt.
