@@ -513,15 +513,18 @@ action:
                       {% endif %}
 
             # ═══════ PHASE 1: HEIZEN (nur wenn AC heat kann) ═══════
+            # Reihenfolge fuer Cloud-Integrationen (Hisense/hismart etc.):
+            # 1. turn_on (falls AC off ist)
+            # 2. set_temperature mit hvac_mode im selben Call (atomar)
+            # 3. set_fan_mode separat
+            # 4. Warten bis HA den Mode-Wechsel bestaetigt hat
             - if:
                 - condition: template
                   value_template: "{{ can_heat }}"
               then:
-                - service: climate.set_hvac_mode
+                - service: climate.turn_on
                   target:
                     entity_id: !input climate_entity
-                  data:
-                    hvac_mode: "heat"
                   continue_on_error: true
                 - delay:
                     seconds: 2
@@ -529,13 +532,24 @@ action:
                   target:
                     entity_id: !input climate_entity
                   data:
+                    hvac_mode: "heat"
                     temperature: !input heat_target_temp
                   continue_on_error: true
+                - delay:
+                    seconds: 2
                 - service: climate.set_fan_mode
                   target:
                     entity_id: !input climate_entity
                   data:
                     fan_mode: !input fan_mode
+                  continue_on_error: true
+
+                # Warte bis AC wirklich im heat-Modus ist (Cloud-Bestaetigung)
+                - wait_template: >
+                    {{ state_attr(v_climate, 'hvac_mode') == 'heat'
+                       or states(v_climate) == 'heat' }}
+                  timeout:
+                    seconds: 30
                   continue_on_error: true
 
                 # Warte bis Zieltemperatur erreicht ODER Timeout
@@ -566,11 +580,9 @@ action:
                 - stop: "Ziel erreicht oder Fenster offen — Zyklus beenden."
 
             # ═══════ PHASE 2: KÜHLEN (aggressiv entfeuchten) ═══════
-            - service: climate.set_hvac_mode
+            - service: climate.turn_on
               target:
                 entity_id: !input climate_entity
-              data:
-                hvac_mode: "cool"
               continue_on_error: true
             - delay:
                 seconds: 2
@@ -578,13 +590,24 @@ action:
               target:
                 entity_id: !input climate_entity
               data:
+                hvac_mode: "cool"
                 temperature: !input cool_target_temp
               continue_on_error: true
+            - delay:
+                seconds: 2
             - service: climate.set_fan_mode
               target:
                 entity_id: !input climate_entity
               data:
                 fan_mode: !input fan_mode
+              continue_on_error: true
+
+            # Warte bis AC wirklich im cool-Modus ist (Cloud-Bestaetigung)
+            - wait_template: >
+                {{ state_attr(v_climate, 'hvac_mode') == 'cool'
+                   or states(v_climate) == 'cool' }}
+              timeout:
+                seconds: 30
               continue_on_error: true
 
             # Warte bis eines der Abbruchkriterien zutrifft
