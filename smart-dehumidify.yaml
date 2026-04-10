@@ -452,6 +452,19 @@ blueprint:
       selector:
         text:
 
+    debug_mode:
+      name: "🐛 Debug-Modus"
+      description: >
+        Wenn aktiviert, schickt die Automation zusätzliche
+        Diagnose-Notifications an jedem wichtigen Entscheidungspunkt
+        (Vorchecks, Feuchteberechnungen, Phasen-Übergänge, Wait-Results).
+        Hilfreich um nachzuvollziehen **warum** die Automation etwas
+        (nicht) gemacht hat. Im Normalbetrieb ausschalten — sonst wird's
+        spammy!
+      default: false
+      selector:
+        boolean:
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VARIABLEN
@@ -483,6 +496,7 @@ variables:
   v_vent_wait_max: !input vent_wait_max_minutes
   v_vent_duration: !input vent_duration_minutes
   v_notify: !input notify_service
+  v_debug: !input debug_mode
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -525,6 +539,25 @@ action:
     value_template: "{{ (not (window_open | bool(false))) and (within_time | bool(true)) and (not (heating_active | bool(false))) }}"
 
   # ────────────────────────────────────────────────────────────────────────
+  # 🐛 DEBUG: Automation gestartet, Vorcheck passed
+  # ────────────────────────────────────────────────────────────────────────
+  - if:
+      - condition: template
+        value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+    then:
+      - service: "{{ v_notify }}"
+        continue_on_error: true
+        data:
+          title: "🐛 [1] Automation gestartet"
+          message: >
+            Vorcheck ✅ passed.
+            window_open={{ window_open }},
+            within_time={{ within_time }},
+            heating_active={{ heating_active }}.
+            Raumsensor: {{ states(v_room_temp) }} °C /
+            {{ states(v_room_hum) }} % rH.
+
+  # ────────────────────────────────────────────────────────────────────────
   # BERECHNUNG ABSOLUTE FEUCHTE (Magnus-Formel)
   # ────────────────────────────────────────────────────────────────────────
   - variables:
@@ -547,6 +580,26 @@ action:
         {% else %}
           99
         {% endif %}
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 🐛 DEBUG: Feuchte berechnet
+  # ────────────────────────────────────────────────────────────────────────
+  - if:
+      - condition: template
+        value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+    then:
+      - service: "{{ v_notify }}"
+        continue_on_error: true
+        data:
+          title: "🐛 [2] Feuchte berechnet"
+          message: >
+            Raum: {{ room_t | round(1) }} °C / {{ room_rh | round(0) }} % rH
+            → {{ room_ah }} g/m³ abs.
+            Außen: {{ out_ah }} g/m³ abs
+            (v_use_outdoor={{ v_use_outdoor }}).
+            Δ = {{ ((room_ah | float) - (out_ah | float)) | round(2) }} g/m³
+            (Schwelle: {{ v_out_advantage }} g/m³).
+            Ziel: <{{ v_target_rh }} % rH / <{{ v_target_ah }} g/m³.
 
   # ────────────────────────────────────────────────────────────────────────
   # Außenvergleich: wenn draußen trockener → Lüften empfehlen
@@ -572,24 +625,24 @@ action:
                 Stoßlüften bringt mehr als die Klimaanlage — AC-Entfeuchten
                 wurde übersprungen.
 
-      # Diagnose: zeigt unconditional die Werte die den Vent-Reminder-Check beeinflussen
+      # 🐛 DEBUG: Vent-Reminder-Check Werte
       - if:
           - condition: template
-            value_template: "{{ v_notify != '' }}"
+            value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
         then:
           - service: "{{ v_notify }}"
             continue_on_error: true
             data:
-              title: "🔬 Vent-Reminder Diagnose"
+              title: "🐛 [3] Vent-Reminder Check"
               message: >
                 vent_reminder_enabled = {{ v_vent_reminder }}
                 (bool: {{ v_vent_reminder | bool(false) }}),
                 window_sensor = '{{ v_window }}'
                 (is_string: {{ v_window is string }},
                 length: {{ v_window | string | length }}),
-                Check-Ergebnis: {{ v_vent_reminder | bool(false)
-                                   and (v_window is string)
-                                   and (v_window | length > 0) }}.
+                → Check-Ergebnis: {{ v_vent_reminder | bool(false)
+                                     and (v_window is string)
+                                     and (v_window | length > 0) }}.
 
       # Stoßlüft-Reminder: nur wenn aktiviert UND Fenstersensor konfiguriert
       - if:
@@ -598,7 +651,7 @@ action:
               {{ v_vent_reminder | bool(false)
                  and (v_window is string) and (v_window | length > 0) }}
         then:
-          # Diagnose: bestätigt dass der Vent-Reminder-Block aktiv ist
+          # User-facing: Aufforderung zum Lüften (nicht debug)
           - if:
               - condition: template
                 value_template: "{{ v_notify != '' }}"
@@ -611,6 +664,19 @@ action:
                     Öffne {{ v_window }} innerhalb von {{ v_vent_wait_max }} min
                     um die Stoßlüft-Erinnerung zu starten.
                     Aktueller Sensor-Status: {{ states(v_window) }}.
+
+          # 🐛 DEBUG: Vent-Wait startet
+          - if:
+              - condition: template
+                value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+            then:
+              - service: "{{ v_notify }}"
+                continue_on_error: true
+                data:
+                  title: "🐛 [4] Vent-Wait startet"
+                  message: >
+                    wait_template: is_state('{{ v_window }}', 'on'),
+                    timeout: {{ v_vent_wait_max }} min.
 
           # 1) Warte bis Fenster tatsächlich geöffnet wird (Timeout = vent_wait_max_minutes)
           - wait_template: "{{ is_state(v_window, 'on') }}"
@@ -817,6 +883,23 @@ action:
                 seconds: 30
               continue_on_error: true
 
+            # 🐛 DEBUG: AC Mode-Bestaetigung
+            - if:
+                - condition: template
+                  value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+              then:
+                - service: "{{ v_notify }}"
+                  continue_on_error: true
+                  data:
+                    title: "🐛 [H1] Heat-Mode bestätigt"
+                    message: >
+                      wait.completed={{ wait.completed | default('n/a') }},
+                      climate.state={{ states(v_climate) }},
+                      hvac_mode={{ state_attr(v_climate, 'hvac_mode') }}.
+                      Jetzt warte auf Raum→{{ v_heat_target }} °C
+                      (aktuell {{ states(v_room_temp) }}, Timeout
+                      {{ v_heat_target }} min).
+
             # Warte bis Zieltemperatur erreicht ODER Fenster offen ODER Timeout
             - wait_template: >
                 {% set win_open = v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') %}
@@ -824,6 +907,21 @@ action:
               timeout:
                 minutes: !input heat_phase_max_minutes
               continue_on_error: true
+
+            # 🐛 DEBUG: Heat-Wait beendet
+            - if:
+                - condition: template
+                  value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+              then:
+                - service: "{{ v_notify }}"
+                  continue_on_error: true
+                  data:
+                    title: "🐛 [H2] Heat-Wait beendet"
+                    message: >
+                      wait.completed={{ wait.completed | default('n/a') }},
+                      Raum={{ states(v_room_temp) }} °C
+                      (Ziel war {{ (v_heat_target | float) - 0.3 }} °C),
+                      Fenster={{ states(v_window) if v_window else 'n/a' }}.
 
             # Heat-Phase beendet Notification
             - if:
@@ -881,6 +979,23 @@ action:
             seconds: 30
           continue_on_error: true
 
+        # 🐛 DEBUG: Cool-Mode bestaetigt
+        - if:
+            - condition: template
+              value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+          then:
+            - service: "{{ v_notify }}"
+              continue_on_error: true
+              data:
+                title: "🐛 [C1] Cool-Mode bestätigt"
+                message: >
+                  wait.completed={{ wait.completed | default('n/a') }},
+                  climate.state={{ states(v_climate) }},
+                  hvac_mode={{ state_attr(v_climate, 'hvac_mode') }}.
+                  Jetzt warte auf Ziel erreicht
+                  ({{ v_target_rh }} % / {{ v_target_ah }} g/m³)
+                  oder Timeout {{ v_cool_target }} min.
+
         # Warte bis eines der Abbruchkriterien zutrifft
         - wait_template: >
             {% set T = states(v_room_temp) | float(99) %}
@@ -895,6 +1010,28 @@ action:
           timeout:
             minutes: !input cool_phase_max_minutes
           continue_on_error: true
+
+        # 🐛 DEBUG: Cool-Wait beendet
+        - if:
+            - condition: template
+              value_template: "{{ v_debug | bool(false) and v_notify != '' }}"
+          then:
+            - service: "{{ v_notify }}"
+              continue_on_error: true
+              data:
+                title: "🐛 [C2] Cool-Wait beendet"
+                message: >
+                  wait.completed={{ wait.completed | default('n/a') }},
+                  Raum={{ states(v_room_temp) }} °C /
+                  {{ states(v_room_hum) }} % rH,
+                  Fenster={{ states(v_window) if v_window else 'n/a' }}.
+                  Grund:
+                  {% set RH = states(v_room_hum) | float(100) %}
+                  {% set T = states(v_room_temp) | float(99) %}
+                  {% if RH <= (v_target_rh | float) %}rH-Ziel erreicht
+                  {% elif T <= (v_min_room | float) %}Raum zu kalt
+                  {% elif v_use_window and is_state(v_window, 'on') %}Fenster offen
+                  {% else %}Timeout{% endif %}.
 
         # Zyklus-Ende Notification (Status nach Kühlphase)
         - if:
