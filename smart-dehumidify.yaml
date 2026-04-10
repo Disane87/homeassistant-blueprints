@@ -253,6 +253,48 @@ blueprint:
           mode: slider
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # STOSSLÜFT-ERINNERUNG
+    # ═══════════════════════════════════════════════════════════════════════════
+    vent_reminder_enabled:
+      name: "Stoßlüft-Erinnerung aktivieren?"
+      description: >
+        Wenn der Außenvergleich Lüften empfiehlt: warte auf Fenster-Öffnung
+        und schicke eine Benachrichtigung sobald die Feuchte auf das Ziel
+        gesunken ist (oder die maximale Lüftdauer erreicht wurde).
+        Benötigt einen konfigurierten Fenstersensor.
+      default: true
+      selector:
+        boolean:
+
+    vent_wait_max_minutes:
+      name: "Max. Wartezeit auf Fenster-Öffnung (Minuten)"
+      description: >
+        Wie lange nach der Lüft-Empfehlung maximal auf das Öffnen des
+        Fensters gewartet wird. Wird kein Fenster geöffnet, passiert nichts.
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    vent_duration_minutes:
+      name: "Max. Lüftdauer (Minuten)"
+      description: >
+        Maximale Lüftdauer nach Fenster-Öffnung. Die Erinnerung kommt
+        früher sobald das Feuchte-Ziel dynamisch erreicht wurde.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # FENSTERSPERRE
     # ═══════════════════════════════════════════════════════════════════════════
     use_window_sensor:
@@ -352,12 +394,19 @@ variables:
   v_max_cycles: !input max_cycles
   v_fan_mode: !input fan_mode
   v_out_advantage: !input outdoor_advantage_min
+  v_vent_reminder: !input vent_reminder_enabled
+  v_vent_wait_max: !input vent_wait_max_minutes
+  v_vent_duration: !input vent_duration_minutes
   v_notify: !input notify_service
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TRIGGER
 # ─────────────────────────────────────────────────────────────────────────────
+# Nur humidity_high — window_opened-Trigger wurde entfernt, damit der
+# Vent-Reminder-Wait im Außenvergleichs-Zweig nicht von mode:single
+# abgewürgt wird. Fenster-Detektion passiert inline in den wait_templates
+# der Heiz-/Kühlphasen.
 trigger:
   - platform: numeric_state
     entity_id: !input room_humidity_sensor
@@ -366,11 +415,6 @@ trigger:
       minutes: 2
     id: humidity_high
 
-  - platform: state
-    entity_id: !input window_sensor
-    to: "on"
-    id: window_opened
-
 
 condition: []
 
@@ -378,208 +422,231 @@ condition: []
 # ─────────────────────────────────────────────────────────────────────────────
 # AKTIONEN
 # ─────────────────────────────────────────────────────────────────────────────
+# Struktur wurde flachgezogen — frueher war ein choose/default mit einem
+# FALL A "Fenster wurde geoeffnet" Branch, der vom window_opened Trigger
+# ausgeloest wurde. Mit mode:single und entferntem Trigger ist das nicht
+# mehr noetig; Fenster-Oeffnung wird inline in den wait_templates erkannt.
 action:
-  - choose:
 
-      # ════════════════════════════════════════════════════════════════════════
-      # FALL A — Fenster wurde geöffnet → laufenden Zyklus stoppen
-      # ════════════════════════════════════════════════════════════════════════
-      - conditions:
-          - condition: trigger
-            id: window_opened
-          - condition: template
-            value_template: "{{ v_use_window | bool(false) }}"
-        sequence:
-          - service: climate.turn_off
-            target:
-              entity_id: !input climate_entity
-          - if:
-              - condition: template
-                value_template: "{{ v_notify != '' }}"
-            then:
-              - service: "{{ v_notify }}"
-                data:
-                  title: "💧 Entfeuchten gestoppt"
-                  message: "Fenster wurde geöffnet — Klimaanlage ausgeschaltet."
+  # ────────────────────────────────────────────────────────────────────────
+  # VORCHECKS: Fenster, Zeitfenster, Heizung
+  # ────────────────────────────────────────────────────────────────────────
+  - variables:
+      window_open: "{{ v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') }}"
+      within_time: "{{ (not v_use_time) or (v_time_start <= now().strftime('%H:%M:%S') <= v_time_end) }}"
+      heating_active: "{{ v_use_heat_lock | bool(false) and (v_heating is string) and (v_heating | length > 0) and ((state_attr(v_heating, 'hvac_action') == 'heating') if v_heating.startswith('climate.') else is_state(v_heating, 'on')) }}"
 
-    # Default-Zweig: normaler Start bei humidity_high
-    default:
+  - condition: template
+    value_template: "{{ (not (window_open | bool(false))) and (within_time | bool(true)) and (not (heating_active | bool(false))) }}"
 
-      # ────────────────────────────────────────────────────────────────────────
-      # VORCHECKS: Fenster, Zeitfenster, Heizung
-      # Wichtig: Werte werden als native Booleans gespeichert — daher einzeilige
-      # Templates mit sauberem boolean-Ergebnis statt mehrzeiliger Folded-Scalars.
-      # ────────────────────────────────────────────────────────────────────────
-      - variables:
-          window_open: "{{ v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') }}"
-          within_time: "{{ (not v_use_time) or (v_time_start <= now().strftime('%H:%M:%S') <= v_time_end) }}"
-          heating_active: "{{ v_use_heat_lock | bool(false) and (v_heating is string) and (v_heating | length > 0) and ((state_attr(v_heating, 'hvac_action') == 'heating') if v_heating.startswith('climate.') else is_state(v_heating, 'on')) }}"
+  # ────────────────────────────────────────────────────────────────────────
+  # BERECHNUNG ABSOLUTE FEUCHTE (Magnus-Formel)
+  # ────────────────────────────────────────────────────────────────────────
+  - variables:
+      room_t: "{{ states(v_room_temp) | float(0) }}"
+      room_rh: "{{ states(v_room_hum) | float(0) }}"
+      room_ah: >
+        {% set T = states(v_room_temp) | float(0) %}
+        {% set RH = states(v_room_hum) | float(0) %}
+        {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+        {% set ah = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+        {{ ah | round(2) }}
+      out_ah: >
+        {% if v_use_outdoor
+              and (v_out_temp is string) and (v_out_temp | length > 0)
+              and (v_out_hum is string) and (v_out_hum | length > 0) %}
+          {% set T = states(v_out_temp) | float(0) %}
+          {% set RH = states(v_out_hum) | float(0) %}
+          {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+          {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
+        {% else %}
+          99
+        {% endif %}
 
+  # ────────────────────────────────────────────────────────────────────────
+  # Außenvergleich: wenn draußen trockener → Lüften empfehlen
+  # + optionaler Stoßlüft-Reminder mit dynamischem Ziel-Check
+  # ────────────────────────────────────────────────────────────────────────
+  - if:
       - condition: template
-        value_template: "{{ (not (window_open | bool(false))) and (within_time | bool(true)) and (not (heating_active | bool(false))) }}"
-
-      # ────────────────────────────────────────────────────────────────────────
-      # BERECHNUNG ABSOLUTE FEUCHTE (Magnus-Formel)
-      # Formel: AH = 216.7 * ( (RH/100 * 6.112 * exp(17.62*T/(243.12+T))) / (273.15+T) )
-      # ────────────────────────────────────────────────────────────────────────
-      - variables:
-          room_t: "{{ states(v_room_temp) | float(0) }}"
-          room_rh: "{{ states(v_room_hum) | float(0) }}"
-          room_ah: >
-            {% set T = states(v_room_temp) | float(0) %}
-            {% set RH = states(v_room_hum) | float(0) %}
-            {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
-            {% set ah = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
-            {{ ah | round(2) }}
-          out_ah: >
-            {% if v_use_outdoor
-                  and v_out_temp not in [none, 'none', {}]
-                  and v_out_hum not in [none, 'none', {}] %}
-              {% set T = states(v_out_temp) | float(0) %}
-              {% set RH = states(v_out_hum) | float(0) %}
-              {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
-              {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
-            {% else %}
-              99
-            {% endif %}
-
-      # ────────────────────────────────────────────────────────────────────────
-      # Außenvergleich: wenn draußen trockener → Lüften empfehlen
-      # ────────────────────────────────────────────────────────────────────────
-      - if:
-          - condition: template
-            value_template: >
-              {{ v_use_outdoor
-                 and (room_ah | float) - (out_ah | float) >= (v_out_advantage | float) }}
-        then:
-          - if:
-              - condition: template
-                value_template: "{{ v_notify != '' }}"
-            then:
-              - service: "{{ v_notify }}"
-                data:
-                  title: "🪟 Lieber lüften!"
-                  message: >
-                    Innen {{ room_ah }} g/m³, außen nur {{ out_ah }} g/m³
-                    absolute Feuchte. Stoßlüften bringt mehr als die
-                    Klimaanlage — AC-Entfeuchten wurde übersprungen.
-          - stop: "Außenluft ist trockener — Lüften empfohlen."
-
-      # ────────────────────────────────────────────────────────────────────────
-      # START-NOTIFICATION
-      # ────────────────────────────────────────────────────────────────────────
+        value_template: >
+          {{ v_use_outdoor
+             and (room_ah | float) - (out_ah | float) >= (v_out_advantage | float) }}
+    then:
       - if:
           - condition: template
             value_template: "{{ v_notify != '' }}"
         then:
           - service: "{{ v_notify }}"
             data:
-              title: "💧 Entfeuchten startet"
+              title: "🪟 Lieber lüften!"
               message: >
-                Start: {{ room_t | round(1) }} °C /
-                {{ room_rh | round(0) }} % rH
-                ({{ room_ah }} g/m³). Ziel: <{{ v_target_rh }} % bzw.
-                <{{ v_target_ah }} g/m³.
+                Innen {{ room_ah }} g/m³, außen nur {{ out_ah }} g/m³
+                absolute Feuchte ({{ ((room_ah | float) - (out_ah | float)) | round(2) }} g/m³ Differenz).
+                Stoßlüften bringt mehr als die Klimaanlage — AC-Entfeuchten
+                wurde übersprungen.
 
-      # ────────────────────────────────────────────────────────────────────────
-      # HEAT-COOL-ZYKLUS — bis zu max_cycles Durchläufe
-      # ────────────────────────────────────────────────────────────────────────
-      - repeat:
-          count: !input max_cycles
-          sequence:
+      # Stoßlüft-Reminder: nur wenn aktiviert UND Fenstersensor konfiguriert
+      - if:
+          - condition: template
+            value_template: >
+              {{ v_vent_reminder | bool(false)
+                 and (v_window is string) and (v_window | length > 0) }}
+        then:
+          # 1) Warte bis Fenster tatsächlich geöffnet wird (Timeout = vent_wait_max_minutes)
+          - wait_template: "{{ is_state(v_window, 'on') }}"
+            timeout:
+              minutes: !input vent_wait_max_minutes
+            continue_on_error: true
 
-            - variables:
-                cycle_num: "{{ repeat.index }}"
-                hvac_modes_list: "{{ state_attr(v_climate, 'hvac_modes') or [] }}"
-                can_heat: "{{ 'heat' in (state_attr(v_climate, 'hvac_modes') or []) }}"
-                can_cool: "{{ 'cool' in (state_attr(v_climate, 'hvac_modes') or []) }}"
+          # 2) Nur wenn das Fenster innerhalb des Timeouts geöffnet wurde
+          - if:
+              - condition: template
+                value_template: "{{ wait.completed | default(false) | bool(false) }}"
+            then:
+              # Notify: "Lüften gestartet, warte auf Zielfeuchte"
+              - if:
+                  - condition: template
+                    value_template: "{{ v_notify != '' }}"
+                then:
+                  - service: "{{ v_notify }}"
+                    data:
+                      title: "🪟 Lüften gestartet"
+                      message: >
+                        Fenster offen — warte bis die Feuchte auf
+                        {{ v_target_rh }} % / {{ v_target_ah }} g/m³ gefallen ist
+                        (max. {{ v_vent_duration }} min) oder das Fenster
+                        wieder geschlossen wird.
 
-            # Zyklus-Start Notification
-            - if:
-                - condition: template
-                  value_template: "{{ v_notify != '' }}"
-              then:
-                - service: "{{ v_notify }}"
-                  data:
-                    title: "🔁 Zyklus {{ cycle_num }}/{{ v_max_cycles }} startet"
-                    message: >
-                      {% if can_heat %}
-                      🔥 Heizphase: heize auf {{ v_heat_target }} °C
-                      (aktuell {{ states(v_room_temp) | float | round(1) }} °C,
-                      {{ states(v_room_hum) | float | round(0) }} % rH).
-                      {% else %}
-                      ⚠️ AC unterstützt kein 'heat' ({{ hvac_modes_list | join(', ') }})
-                      — Heizphase wird übersprungen, starte direkt Kühlphase.
-                      {% endif %}
+              # 3) Warte dynamisch: Ziel erreicht ODER Fenster zu ODER Timeout
+              - wait_template: >
+                  {% set T = states(v_room_temp) | float(99) %}
+                  {% set RH = states(v_room_hum) | float(100) %}
+                  {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+                  {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+                  {{ RH <= (v_target_rh | float)
+                     or AH <= (v_target_ah | float)
+                     or is_state(v_window, 'off') }}
+                timeout:
+                  minutes: !input vent_duration_minutes
+                continue_on_error: true
 
-            # ═══════ PHASE 1: HEIZEN (nur wenn AC heat kann) ═══════
-            # Reihenfolge fuer Cloud-Integrationen (Hisense/hismart etc.):
-            # 1. turn_on (falls AC off ist)
-            # 2. set_temperature mit hvac_mode im selben Call (atomar)
-            # 3. set_fan_mode separat
-            # 4. Warten bis HA den Mode-Wechsel bestaetigt hat
-            - if:
-                - condition: template
-                  value_template: "{{ can_heat }}"
-              then:
-                - service: climate.turn_on
-                  target:
-                    entity_id: !input climate_entity
-                  continue_on_error: true
-                - delay:
-                    seconds: 2
-                - service: climate.set_temperature
-                  target:
-                    entity_id: !input climate_entity
-                  data:
-                    hvac_mode: "heat"
-                    temperature: !input heat_target_temp
-                  continue_on_error: true
-                - delay:
-                    seconds: 2
-                - service: climate.set_fan_mode
-                  target:
-                    entity_id: !input climate_entity
-                  data:
-                    fan_mode: !input fan_mode
-                  continue_on_error: true
+              # 4) Status auswerten und passende Notification schicken
+              - variables:
+                  vent_completed: "{{ wait.completed | default(false) | bool(false) }}"
+                  vent_window_closed: "{{ is_state(v_window, 'off') }}"
+                  vent_t: "{{ states(v_room_temp) | float(0) | round(1) }}"
+                  vent_rh: "{{ states(v_room_hum) | float(0) | round(0) }}"
+                  vent_ah: >-
+                    {% set T = states(v_room_temp) | float(0) %}
+                    {% set RH = states(v_room_hum) | float(0) %}
+                    {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+                    {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
+                  vent_target_reached: >-
+                    {% set T = states(v_room_temp) | float(99) %}
+                    {% set RH = states(v_room_hum) | float(100) %}
+                    {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+                    {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+                    {{ RH <= (v_target_rh | float) or AH <= (v_target_ah | float) }}
 
-                # Warte bis AC wirklich im heat-Modus ist (Cloud-Bestaetigung)
-                - wait_template: >
-                    {{ state_attr(v_climate, 'hvac_mode') == 'heat'
-                       or states(v_climate) == 'heat' }}
-                  timeout:
-                    seconds: 30
-                  continue_on_error: true
+              - if:
+                  - condition: template
+                    value_template: "{{ v_notify != '' }}"
+                then:
+                  - choose:
+                      # Ziel dynamisch erreicht — ideale Meldung
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ vent_target_reached | bool(false) }}"
+                        sequence:
+                          - service: "{{ v_notify }}"
+                            data:
+                              title: "✅ Lüft-Ziel erreicht — Fenster schließen"
+                              message: >
+                                {{ vent_t }} °C / {{ vent_rh }} % rH
+                                ({{ vent_ah }} g/m³). Entfeuchtungsziel erreicht,
+                                Fenster kann jetzt geschlossen werden.
 
-                # Warte bis Zieltemperatur erreicht ODER Timeout
-                - wait_template: >
-                    {{ states(v_room_temp) | float(0) >= (v_heat_target | float) - 0.3 }}
-                  timeout:
-                    minutes: !input heat_phase_max_minutes
-                  continue_on_error: true
+                      # User hat Fenster schon geschlossen → kurze Info
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ vent_window_closed | bool(false) }}"
+                        sequence:
+                          - service: "{{ v_notify }}"
+                            data:
+                              title: "🪟 Fenster geschlossen"
+                              message: >
+                                Aktueller Stand: {{ vent_t }} °C /
+                                {{ vent_rh }} % rH ({{ vent_ah }} g/m³).
+                                Ziel {{ v_target_rh }} % / {{ v_target_ah }} g/m³
+                                {{ '✅ erreicht' if vent_target_reached else '❌ noch nicht erreicht' }}.
 
-                # Heat-Phase beendet Notification
-                - if:
-                    - condition: template
-                      value_template: "{{ v_notify != '' }}"
-                  then:
-                    - service: "{{ v_notify }}"
-                      data:
-                        title: "🔥 Heizphase beendet"
-                        message: >
-                          Raum bei {{ states(v_room_temp) | float | round(1) }} °C,
-                          {{ states(v_room_hum) | float | round(0) }} % rH.
-                          Starte Kühlphase ❄️ auf {{ v_cool_target }} °C.
+                    # Fallback: Timeout erreicht, Fenster noch offen, Ziel nicht erreicht
+                    default:
+                      - service: "{{ v_notify }}"
+                        data:
+                          title: "⏰ {{ v_vent_duration }} min gelüftet"
+                          message: >
+                            {{ vent_t }} °C / {{ vent_rh }} % rH
+                            ({{ vent_ah }} g/m³). Maximale Lüftdauer erreicht,
+                            Ziel {{ v_target_rh }} % / {{ v_target_ah }} g/m³
+                            noch nicht erreicht. Fenster kann trotzdem
+                            geschlossen werden.
 
-            # Frühabbruch wenn Fenster/Feuchte-Ziel bereits erreicht
-            - if:
-                - condition: template
-                  value_template: "{{ (v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on')) or (states(v_room_hum) | float(100) <= (v_target_rh | float)) }}"
-              then:
-                - stop: "Ziel erreicht oder Fenster offen — Zyklus beenden."
+      - stop: "Außenluft ist trockener — Lüften empfohlen."
 
-            # ═══════ PHASE 2: KÜHLEN (aggressiv entfeuchten) ═══════
+  # ────────────────────────────────────────────────────────────────────────
+  # START-NOTIFICATION
+  # ────────────────────────────────────────────────────────────────────────
+  - if:
+      - condition: template
+        value_template: "{{ v_notify != '' }}"
+    then:
+      - service: "{{ v_notify }}"
+        data:
+          title: "💧 Entfeuchten startet"
+          message: >
+            Start: {{ room_t | round(1) }} °C /
+            {{ room_rh | round(0) }} % rH
+            ({{ room_ah }} g/m³). Ziel: <{{ v_target_rh }} % bzw.
+            <{{ v_target_ah }} g/m³.
+
+  # ────────────────────────────────────────────────────────────────────────
+  # HEAT-COOL-ZYKLUS — bis zu max_cycles Durchläufe
+  # ────────────────────────────────────────────────────────────────────────
+  - repeat:
+      count: !input max_cycles
+      sequence:
+
+        - variables:
+            cycle_num: "{{ repeat.index }}"
+            hvac_modes_list: "{{ state_attr(v_climate, 'hvac_modes') or [] }}"
+            can_heat: "{{ 'heat' in (state_attr(v_climate, 'hvac_modes') or []) }}"
+            can_cool: "{{ 'cool' in (state_attr(v_climate, 'hvac_modes') or []) }}"
+
+        # Zyklus-Start Notification
+        - if:
+            - condition: template
+              value_template: "{{ v_notify != '' }}"
+          then:
+            - service: "{{ v_notify }}"
+              data:
+                title: "🔁 Zyklus {{ cycle_num }}/{{ v_max_cycles }} startet"
+                message: >
+                  {% if can_heat %}
+                  🔥 Heizphase: heize auf {{ v_heat_target }} °C
+                  (aktuell {{ states(v_room_temp) | float | round(1) }} °C,
+                  {{ states(v_room_hum) | float | round(0) }} % rH).
+                  {% else %}
+                  ⚠️ AC unterstützt kein 'heat' ({{ hvac_modes_list | join(', ') }})
+                  — Heizphase wird übersprungen, starte direkt Kühlphase.
+                  {% endif %}
+
+        # ═══════ PHASE 1: HEIZEN (nur wenn AC heat kann) ═══════
+        - if:
+            - condition: template
+              value_template: "{{ can_heat }}"
+          then:
             - service: climate.turn_on
               target:
                 entity_id: !input climate_entity
@@ -590,8 +657,8 @@ action:
               target:
                 entity_id: !input climate_entity
               data:
-                hvac_mode: "cool"
-                temperature: !input cool_target_temp
+                hvac_mode: "heat"
+                temperature: !input heat_target_temp
               continue_on_error: true
             - delay:
                 seconds: 2
@@ -602,87 +669,159 @@ action:
                 fan_mode: !input fan_mode
               continue_on_error: true
 
-            # Warte bis AC wirklich im cool-Modus ist (Cloud-Bestaetigung)
+            # Warte bis AC wirklich im heat-Modus ist (Cloud-Bestaetigung)
             - wait_template: >
-                {{ state_attr(v_climate, 'hvac_mode') == 'cool'
-                   or states(v_climate) == 'cool' }}
+                {{ state_attr(v_climate, 'hvac_mode') == 'heat'
+                   or states(v_climate) == 'heat' }}
               timeout:
                 seconds: 30
               continue_on_error: true
 
-            # Warte bis eines der Abbruchkriterien zutrifft
+            # Warte bis Zieltemperatur erreicht ODER Fenster offen ODER Timeout
             - wait_template: >
-                {% set T = states(v_room_temp) | float(99) %}
-                {% set RH = states(v_room_hum) | float(100) %}
-                {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
-                {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
                 {% set win_open = v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') %}
-                {{ RH <= (v_target_rh | float)
-                   or AH <= (v_target_ah | float)
-                   or T <= (v_min_room | float)
-                   or win_open }}
+                {{ (states(v_room_temp) | float(0) >= (v_heat_target | float) - 0.3) or win_open }}
               timeout:
-                minutes: !input cool_phase_max_minutes
+                minutes: !input heat_phase_max_minutes
               continue_on_error: true
 
-            # Zyklus-Ende Notification (Status nach Kühlphase)
+            # Heat-Phase beendet Notification
             - if:
                 - condition: template
                   value_template: "{{ v_notify != '' }}"
               then:
                 - service: "{{ v_notify }}"
                   data:
-                    title: "❄️ Zyklus {{ cycle_num }}/{{ v_max_cycles }} Kühlphase beendet"
+                    title: "🔥 Heizphase beendet"
                     message: >
-                      Raum: {{ states(v_room_temp) | float | round(1) }} °C /
-                      {{ states(v_room_hum) | float | round(0) }} % rH
-                      ({% set T = states(v_room_temp) | float(0) %}{% set RH = states(v_room_hum) | float(0) %}{% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}{{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }} g/m³).
+                      Raum bei {{ states(v_room_temp) | float | round(1) }} °C,
+                      {{ states(v_room_hum) | float | round(0) }} % rH.
+                      Starte Kühlphase ❄️ auf {{ v_cool_target }} °C.
 
-            # Wenn Ziel erreicht → Schleife verlassen
-            - if:
-                - condition: template
-                  value_template: >
-                    {% set T = states(v_room_temp) | float(99) %}
-                    {% set RH = states(v_room_hum) | float(100) %}
-                    {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
-                    {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
-                    {{ RH <= (v_target_rh | float) or AH <= (v_target_ah | float) }}
-              then:
-                - stop: "Entfeuchtungsziel erreicht."
+        # Frühabbruch wenn Fenster/Feuchte-Ziel bereits erreicht
+        - if:
+            - condition: template
+              value_template: "{{ (v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on')) or (states(v_room_hum) | float(100) <= (v_target_rh | float)) }}"
+          then:
+            - service: climate.turn_off
+              target:
+                entity_id: !input climate_entity
+              continue_on_error: true
+            - stop: "Ziel erreicht oder Fenster offen — Zyklus beenden."
 
-            # Wenn Raum zu kalt oder Fenster offen → abbrechen
-            - if:
-                - condition: template
-                  value_template: "{{ (states(v_room_temp) | float(99) <= (v_min_room | float)) or (v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on')) }}"
-              then:
-                - stop: "Abbruch — Raum zu kalt oder Fenster offen."
+        # ═══════ PHASE 2: KÜHLEN (aggressiv entfeuchten) ═══════
+        - service: climate.turn_on
+          target:
+            entity_id: !input climate_entity
+          continue_on_error: true
+        - delay:
+            seconds: 2
+        - service: climate.set_temperature
+          target:
+            entity_id: !input climate_entity
+          data:
+            hvac_mode: "cool"
+            temperature: !input cool_target_temp
+          continue_on_error: true
+        - delay:
+            seconds: 2
+        - service: climate.set_fan_mode
+          target:
+            entity_id: !input climate_entity
+          data:
+            fan_mode: !input fan_mode
+          continue_on_error: true
 
-      # ────────────────────────────────────────────────────────────────────────
-      # ABSCHLUSS: AC ausschalten + Benachrichtigung
-      # ────────────────────────────────────────────────────────────────────────
-      - service: climate.turn_off
-        target:
-          entity_id: !input climate_entity
+        # Warte bis AC wirklich im cool-Modus ist (Cloud-Bestaetigung)
+        - wait_template: >
+            {{ state_attr(v_climate, 'hvac_mode') == 'cool'
+               or states(v_climate) == 'cool' }}
+          timeout:
+            seconds: 30
+          continue_on_error: true
 
-      - variables:
-          end_t: "{{ states(v_room_temp) | float(0) }}"
-          end_rh: "{{ states(v_room_hum) | float(0) }}"
-          end_ah: >
-            {% set T = states(v_room_temp) | float(0) %}
-            {% set RH = states(v_room_hum) | float(0) %}
+        # Warte bis eines der Abbruchkriterien zutrifft
+        - wait_template: >
+            {% set T = states(v_room_temp) | float(99) %}
+            {% set RH = states(v_room_hum) | float(100) %}
             {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
-            {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
+            {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+            {% set win_open = v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') %}
+            {{ RH <= (v_target_rh | float)
+               or AH <= (v_target_ah | float)
+               or T <= (v_min_room | float)
+               or win_open }}
+          timeout:
+            minutes: !input cool_phase_max_minutes
+          continue_on_error: true
 
-      - if:
-          - condition: template
-            value_template: "{{ v_notify != '' }}"
-        then:
-          - service: "{{ v_notify }}"
-            data:
-              title: "✅ Entfeuchten beendet"
-              message: >
-                Ende: {{ end_t | round(1) }} °C /
-                {{ end_rh | round(0) }} % rH ({{ end_ah }} g/m³).
+        # Zyklus-Ende Notification (Status nach Kühlphase)
+        - if:
+            - condition: template
+              value_template: "{{ v_notify != '' }}"
+          then:
+            - service: "{{ v_notify }}"
+              data:
+                title: "❄️ Zyklus {{ cycle_num }}/{{ v_max_cycles }} Kühlphase beendet"
+                message: >
+                  Raum: {{ states(v_room_temp) | float | round(1) }} °C /
+                  {{ states(v_room_hum) | float | round(0) }} % rH
+                  ({% set T = states(v_room_temp) | float(0) %}{% set RH = states(v_room_hum) | float(0) %}{% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}{{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }} g/m³).
 
-mode: restart
+        # Wenn Ziel erreicht → Schleife verlassen (AC vorher aus!)
+        - if:
+            - condition: template
+              value_template: >
+                {% set T = states(v_room_temp) | float(99) %}
+                {% set RH = states(v_room_hum) | float(100) %}
+                {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+                {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+                {{ RH <= (v_target_rh | float) or AH <= (v_target_ah | float) }}
+          then:
+            - service: climate.turn_off
+              target:
+                entity_id: !input climate_entity
+              continue_on_error: true
+            - stop: "Entfeuchtungsziel erreicht."
+
+        # Wenn Raum zu kalt oder Fenster offen → abbrechen (AC vorher aus!)
+        - if:
+            - condition: template
+              value_template: "{{ (states(v_room_temp) | float(99) <= (v_min_room | float)) or (v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on')) }}"
+          then:
+            - service: climate.turn_off
+              target:
+                entity_id: !input climate_entity
+              continue_on_error: true
+            - stop: "Abbruch — Raum zu kalt oder Fenster offen."
+
+  # ────────────────────────────────────────────────────────────────────────
+  # ABSCHLUSS: AC ausschalten + Benachrichtigung
+  # ────────────────────────────────────────────────────────────────────────
+  - service: climate.turn_off
+    target:
+      entity_id: !input climate_entity
+    continue_on_error: true
+
+  - variables:
+      end_t: "{{ states(v_room_temp) | float(0) }}"
+      end_rh: "{{ states(v_room_hum) | float(0) }}"
+      end_ah: >
+        {% set T = states(v_room_temp) | float(0) %}
+        {% set RH = states(v_room_hum) | float(0) %}
+        {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
+        {{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }}
+
+  - if:
+      - condition: template
+        value_template: "{{ v_notify != '' }}"
+    then:
+      - service: "{{ v_notify }}"
+        data:
+          title: "✅ Entfeuchten beendet"
+          message: >
+            Ende: {{ end_t | round(1) }} °C /
+            {{ end_rh | round(0) }} % rH ({{ end_ah }} g/m³).
+
+mode: single
 max_exceeded: silent
