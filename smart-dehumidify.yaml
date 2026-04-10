@@ -264,7 +264,7 @@ blueprint:
 
     window_sensor:
       name: "Fenstersensor"
-      default: {}
+      default: ""
       selector:
         entity:
           domain: binary_sensor
@@ -307,7 +307,7 @@ blueprint:
 
     heating_entity:
       name: "Heizungsgerät"
-      default: {}
+      default: ""
       selector:
         entity:
           domain:
@@ -388,7 +388,7 @@ action:
           - condition: trigger
             id: window_opened
           - condition: template
-            value_template: "{{ v_use_window }}"
+            value_template: "{{ v_use_window | bool(false) }}"
         sequence:
           - service: climate.turn_off
             target:
@@ -407,32 +407,16 @@ action:
 
       # ────────────────────────────────────────────────────────────────────────
       # VORCHECKS: Fenster, Zeitfenster, Heizung
+      # Wichtig: Werte werden als native Booleans gespeichert — daher einzeilige
+      # Templates mit sauberem boolean-Ergebnis statt mehrzeiliger Folded-Scalars.
       # ────────────────────────────────────────────────────────────────────────
       - variables:
-          window_open: >
-            {{ v_use_window and v_window not in [none, 'none', {}]
-               and is_state(v_window, 'on') }}
-          within_time: >
-            {% if not v_use_time %}
-              true
-            {% else %}
-              {% set t = now().strftime('%H:%M:%S') %}
-              {{ v_time_start <= t <= v_time_end }}
-            {% endif %}
-          heating_active: >
-            {% if not v_use_heat_lock or v_heating in [none, 'none', {}] %}
-              false
-            {% else %}
-              {% set d = v_heating.split('.')[0] %}
-              {% if d == 'climate' %}
-                {{ state_attr(v_heating, 'hvac_action') == 'heating' }}
-              {% else %}
-                {{ is_state(v_heating, 'on') }}
-              {% endif %}
-            {% endif %}
+          window_open: "{{ v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') }}"
+          within_time: "{{ (not v_use_time) or (v_time_start <= now().strftime('%H:%M:%S') <= v_time_end) }}"
+          heating_active: "{{ v_use_heat_lock | bool(false) and (v_heating is string) and (v_heating | length > 0) and ((state_attr(v_heating, 'hvac_action') == 'heating') if v_heating.startswith('climate.') else is_state(v_heating, 'on')) }}"
 
       - condition: template
-        value_template: "{{ not window_open and within_time and not heating_active }}"
+        value_template: "{{ (not (window_open | bool(false))) and (within_time | bool(true)) and (not (heating_active | bool(false))) }}"
 
       # ────────────────────────────────────────────────────────────────────────
       # BERECHNUNG ABSOLUTE FEUCHTE (Magnus-Formel)
@@ -532,10 +516,7 @@ action:
             # Frühabbruch wenn Fenster/Feuchte-Ziel bereits erreicht
             - if:
                 - condition: template
-                  value_template: >
-                    {{ (v_use_window and v_window not in [none, 'none', {}]
-                        and is_state(v_window, 'on'))
-                       or states(v_room_hum) | float(100) <= (v_target_rh | float) }}
+                  value_template: "{{ (v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on')) or (states(v_room_hum) | float(100) <= (v_target_rh | float)) }}"
               then:
                 - stop: "Ziel erreicht oder Fenster offen — Zyklus beenden."
 
@@ -563,11 +544,11 @@ action:
                 {% set RH = states(v_room_hum) | float(100) %}
                 {% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}
                 {% set AH = 216.7 * (RH / 100 * pws) / (273.15 + T) %}
+                {% set win_open = v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on') %}
                 {{ RH <= (v_target_rh | float)
                    or AH <= (v_target_ah | float)
                    or T <= (v_min_room | float)
-                   or (v_use_window and v_window not in [none, 'none', {}]
-                       and is_state(v_window, 'on')) }}
+                   or win_open }}
               timeout:
                 minutes: !input cool_phase_max_minutes
               continue_on_error: true
@@ -587,10 +568,7 @@ action:
             # Wenn Raum zu kalt oder Fenster offen → abbrechen
             - if:
                 - condition: template
-                  value_template: >
-                    {{ states(v_room_temp) | float(99) <= (v_min_room | float)
-                       or (v_use_window and v_window not in [none, 'none', {}]
-                           and is_state(v_window, 'on')) }}
+                  value_template: "{{ (states(v_room_temp) | float(99) <= (v_min_room | float)) or (v_use_window | bool(false) and (v_window is string) and (v_window | length > 0) and is_state(v_window, 'on')) }}"
               then:
                 - stop: "Abbruch — Raum zu kalt oder Fenster offen."
 
