@@ -493,6 +493,19 @@ action:
               {{ v_vent_reminder | bool(false)
                  and (v_window is string) and (v_window | length > 0) }}
         then:
+          # Diagnose: bestätigt dass der Vent-Reminder-Block aktiv ist
+          - if:
+              - condition: template
+                value_template: "{{ v_notify != '' }}"
+            then:
+              - service: "{{ v_notify }}"
+                data:
+                  title: "⏳ Warte auf Fenster-Öffnung"
+                  message: >
+                    Öffne {{ v_window }} innerhalb von {{ v_vent_wait_max }} min
+                    um die Stoßlüft-Erinnerung zu starten.
+                    Aktueller Sensor-Status: {{ states(v_window) }}.
+
           # 1) Warte bis Fenster tatsächlich geöffnet wird (Timeout = vent_wait_max_minutes)
           - wait_template: "{{ is_state(v_window, 'on') }}"
             timeout:
@@ -517,6 +530,20 @@ action:
                         {{ v_target_rh }} % / {{ v_target_ah }} g/m³ gefallen ist
                         (max. {{ v_vent_duration }} min) oder das Fenster
                         wieder geschlossen wird.
+            else:
+              # Diagnose: Wait ist durchgelaufen ohne dass das Fenster aufging
+              - if:
+                  - condition: template
+                    value_template: "{{ v_notify != '' }}"
+                then:
+                  - service: "{{ v_notify }}"
+                    data:
+                      title: "⌛ Kein Fenster geöffnet"
+                      message: >
+                        {{ v_vent_wait_max }} min abgelaufen ohne dass
+                        {{ v_window }} geöffnet wurde
+                        (Status: {{ states(v_window) }}).
+                        Stoßlüft-Erinnerung wird übersprungen.
 
               # 3) Warte dynamisch: Ziel erreicht ODER Fenster zu ODER Timeout
               - wait_template: >
