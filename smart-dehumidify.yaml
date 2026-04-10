@@ -488,30 +488,75 @@ action:
           count: !input max_cycles
           sequence:
 
-            # ═══════ PHASE 1: HEIZEN ═══════
-            - service: climate.set_hvac_mode
-              target:
-                entity_id: !input climate_entity
-              data:
-                hvac_mode: "heat"
-            - service: climate.set_temperature
-              target:
-                entity_id: !input climate_entity
-              data:
-                temperature: !input heat_target_temp
-            - service: climate.set_fan_mode
-              target:
-                entity_id: !input climate_entity
-              data:
-                fan_mode: !input fan_mode
-              continue_on_error: true
+            - variables:
+                cycle_num: "{{ repeat.index }}"
+                hvac_modes_list: "{{ state_attr(v_climate, 'hvac_modes') or [] }}"
+                can_heat: "{{ 'heat' in (state_attr(v_climate, 'hvac_modes') or []) }}"
+                can_cool: "{{ 'cool' in (state_attr(v_climate, 'hvac_modes') or []) }}"
 
-            # Warte bis Zieltemperatur erreicht ODER Timeout
-            - wait_template: >
-                {{ states(v_room_temp) | float(0) >= (v_heat_target | float) - 0.3 }}
-              timeout:
-                minutes: !input heat_phase_max_minutes
-              continue_on_error: true
+            # Zyklus-Start Notification
+            - if:
+                - condition: template
+                  value_template: "{{ v_notify != '' }}"
+              then:
+                - service: "{{ v_notify }}"
+                  data:
+                    title: "🔁 Zyklus {{ cycle_num }}/{{ v_max_cycles }} startet"
+                    message: >
+                      {% if can_heat %}
+                      🔥 Heizphase: heize auf {{ v_heat_target }} °C
+                      (aktuell {{ states(v_room_temp) | float | round(1) }} °C,
+                      {{ states(v_room_hum) | float | round(0) }} % rH).
+                      {% else %}
+                      ⚠️ AC unterstützt kein 'heat' ({{ hvac_modes_list | join(', ') }})
+                      — Heizphase wird übersprungen, starte direkt Kühlphase.
+                      {% endif %}
+
+            # ═══════ PHASE 1: HEIZEN (nur wenn AC heat kann) ═══════
+            - if:
+                - condition: template
+                  value_template: "{{ can_heat }}"
+              then:
+                - service: climate.set_hvac_mode
+                  target:
+                    entity_id: !input climate_entity
+                  data:
+                    hvac_mode: "heat"
+                  continue_on_error: true
+                - delay:
+                    seconds: 2
+                - service: climate.set_temperature
+                  target:
+                    entity_id: !input climate_entity
+                  data:
+                    temperature: !input heat_target_temp
+                  continue_on_error: true
+                - service: climate.set_fan_mode
+                  target:
+                    entity_id: !input climate_entity
+                  data:
+                    fan_mode: !input fan_mode
+                  continue_on_error: true
+
+                # Warte bis Zieltemperatur erreicht ODER Timeout
+                - wait_template: >
+                    {{ states(v_room_temp) | float(0) >= (v_heat_target | float) - 0.3 }}
+                  timeout:
+                    minutes: !input heat_phase_max_minutes
+                  continue_on_error: true
+
+                # Heat-Phase beendet Notification
+                - if:
+                    - condition: template
+                      value_template: "{{ v_notify != '' }}"
+                  then:
+                    - service: "{{ v_notify }}"
+                      data:
+                        title: "🔥 Heizphase beendet"
+                        message: >
+                          Raum bei {{ states(v_room_temp) | float | round(1) }} °C,
+                          {{ states(v_room_hum) | float | round(0) }} % rH.
+                          Starte Kühlphase ❄️ auf {{ v_cool_target }} °C.
 
             # Frühabbruch wenn Fenster/Feuchte-Ziel bereits erreicht
             - if:
@@ -526,11 +571,15 @@ action:
                 entity_id: !input climate_entity
               data:
                 hvac_mode: "cool"
+              continue_on_error: true
+            - delay:
+                seconds: 2
             - service: climate.set_temperature
               target:
                 entity_id: !input climate_entity
               data:
                 temperature: !input cool_target_temp
+              continue_on_error: true
             - service: climate.set_fan_mode
               target:
                 entity_id: !input climate_entity
@@ -552,6 +601,19 @@ action:
               timeout:
                 minutes: !input cool_phase_max_minutes
               continue_on_error: true
+
+            # Zyklus-Ende Notification (Status nach Kühlphase)
+            - if:
+                - condition: template
+                  value_template: "{{ v_notify != '' }}"
+              then:
+                - service: "{{ v_notify }}"
+                  data:
+                    title: "❄️ Zyklus {{ cycle_num }}/{{ v_max_cycles }} Kühlphase beendet"
+                    message: >
+                      Raum: {{ states(v_room_temp) | float | round(1) }} °C /
+                      {{ states(v_room_hum) | float | round(0) }} % rH
+                      ({% set T = states(v_room_temp) | float(0) %}{% set RH = states(v_room_hum) | float(0) %}{% set pws = 6.112 * (2.718281828 ** (17.62 * T / (243.12 + T))) %}{{ (216.7 * (RH / 100 * pws) / (273.15 + T)) | round(2) }} g/m³).
 
             # Wenn Ziel erreicht → Schleife verlassen
             - if:
