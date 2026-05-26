@@ -1,0 +1,62 @@
+name: 🐛 Bug Report
+description: Ein Blueprint verhält sich nicht wie erwartet
+labels: ["bug", "triage"]
+body:
+  - type: dropdown
+    id: blueprint
+    attributes:
+      label: Welcher Blueprint?
+      options:
+        - Klimaanlage Smart Control
+        - Smart AC Automation
+        - Smart Entfeuchten
+        - Heizung Sommermodus
+        - Sonstiger / mehrere
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Version
+      placeholder: "z.B. 2026.5.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Erwartetes Verhalten
+      description: Was sollte passieren?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Tatsächliches Verhalten
+      description: Was passiert stattdessen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: automation_yaml
+    attributes:
+      label: Automation YAML (Inputs anonymisiert)
+      description: Aus `automations.yaml` oder dem UI-Editor. Sensible Entity-IDs ruhig durch Platzhalter ersetzen.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: HA-Logs / Automation-Trace
+      description: Auszug aus `Einstellungen → System → Protokolle` oder die Spur der Automation (`Automatisierungen → … → Spuren`)
+      render: shell
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Umgebung
+      description: Welche Klima-Integration (ConnectLife, Tuya, MQTT…), welche Sensoren, Fußbodenheizung ja/nein?

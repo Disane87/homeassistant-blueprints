@@ -1,0 +1,35 @@
+name: 💡 Feature Request
+description: Vorschlag für eine Erweiterung oder neuen Blueprint
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case
+      description: Welches konkrete Szenario soll der Blueprint abdecken? Schreib das wie eine User Story.
+      placeholder: "Wenn ich morgens aufstehe und es draußen wärmer als drinnen ist, soll …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Erweiterung eines bestehenden Blueprints
+        - Neuer Blueprint
+        - Unklar / beides denkbar
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing
+    attributes:
+      label: Falls bestehender Blueprint: welcher und wo fehlt was?
+      placeholder: "Klimaanlage Smart Control: braucht zusätzlich einen Luftfeuchte-Trigger weil …"
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Bereits versuchte Alternativen
+      description: Hast du es schon mit einer Standard-Automation, einem anderen Blueprint oder einer Helper-Kombi probiert? Was hat nicht geklappt?

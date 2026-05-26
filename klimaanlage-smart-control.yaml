@@ -1,0 +1,636 @@
+blueprint:
+  name: Klimaanlage Smart Control
+  description: 'Steuert eine Split-Klimaanlage intelligent basierend auf Raum- und
+    Außentemperatur. Optionale Fußbodenheizungs-Koordination (wird abgeschaltet wenn
+    die Klimaanlage läuft) und Fenstersensor-Unterstützung (AC stoppt bei geöffnetem
+    Fenster und startet nicht erneut bis es geschlossen ist).
+
+    '
+  domain: automation
+  author: disane
+  input:
+    section_geraet:
+      name: Gerät & Sensoren
+      icon: mdi:air-conditioner
+      input:
+        climate_entity:
+          name: Klimaanlage (ConnectLife)
+          selector:
+            entity:
+              domain:
+              - climate
+              reorder: false
+              multiple: false
+        room_temp_sensor:
+          name: Raumtemperatursensor
+          description: 'Büro Marco → sensor.klimasensor_buro_marco_temperature Malian     →
+            sensor.klimasensor_kinderzimmer_temperature
+
+            '
+          selector:
+            entity:
+              domain:
+              - sensor
+              device_class:
+              - temperature
+              reorder: false
+              multiple: false
+        outdoor_temp_sensor:
+          name: Außentemperatursensor
+          default: sensor.klima_wohnzimmer_wetter_garten_temperature
+          selector:
+            entity:
+              domain:
+              - sensor
+              device_class:
+              - temperature
+              reorder: false
+              multiple: false
+    section_thermostat_fenster:
+      name: Thermostat & Fenster
+      icon: mdi:thermometer-lines
+      input:
+        thermostat_entity:
+          name: Fußbodenheizung / Thermostat (optional)
+          description: 'Wird auf "off" gesetzt sobald die Klimaanlage läuft. Wird
+            wieder auf "heat" gesetzt wenn die Klimaanlage stoppt und Heizen sinnvoll
+            ist (Außentemp. unter Heiz-Obergrenze).
+
+            '
+          default:
+          selector:
+            entity:
+              domain:
+              - climate
+              reorder: false
+              multiple: false
+        window_sensor:
+          name: Fenstersensor (optional)
+          description: 'Klimaanlage startet nicht bei geöffnetem Fenster. Läuft die
+            Klimaanlage und das Fenster öffnet, schaltet sie sofort ab (Thermostat
+            wird dabei NICHT wiederhergestellt).
+
+            '
+          default:
+          selector:
+            entity:
+              domain:
+              - binary_sensor
+              device_class:
+              - window
+              - opening
+              reorder: false
+              multiple: false
+    section_praesenz:
+      name: Anwesenheit
+      icon: mdi:account-group
+      input:
+        presence_sensor:
+          name: Anwesenheitssensor (optional)
+          description: 'Klimaanlage startet nicht wenn niemand zuhause ist und schaltet
+            ab, sobald alle das Haus verlassen. Erwartet binary_sensor: ''on'' =
+            jemand zuhause, ''off'' = niemand zuhause.
+
+            '
+          default: binary_sensor.family_presence
+          selector:
+            entity:
+              domain:
+              - binary_sensor
+              reorder: false
+              multiple: false
+        presence_required:
+          name: Anwesenheit erforderlich
+          description: Wenn aktiv, läuft die Klimaanlage nur bei Anwesenheit. Aus
+            = Sensor wird ignoriert.
+          default: true
+          selector:
+            boolean: {}
+        room_presence_sensor:
+          name: Raumpräsenzsensor (optional)
+          description: 'Zusätzlicher Sensor für die Raumebene (z.B. mmWave/PIR). AC
+            läuft nur wenn jemand im Raum ist. ''on'' = Person im Raum, ''off'' =
+            niemand im Raum. Default fällt auf den Haus-Anwesenheitssensor zurück
+            (= keine Raum-Ebene aktiv).
+
+            '
+          default: binary_sensor.family_presence
+          selector:
+            entity:
+              domain:
+              - binary_sensor
+              reorder: false
+              multiple: false
+        room_presence_required:
+          name: Raumpräsenz erforderlich
+          description: Wenn aktiv, läuft die Klimaanlage nur bei Raumpräsenz. Aus
+            = Sensor wird ignoriert.
+          default: true
+          selector:
+            boolean: {}
+        room_presence_grace_minutes:
+          name: Raumpräsenz Nachlaufzeit (Minuten)
+          description: 'AC bleibt nach Verlassen des Raums noch X Minuten an, bevor
+            sie abschaltet. Vermeidet ständiges An/Aus bei kurzer Abwesenheit (z.B.
+            Toilette).
+
+            '
+          default: 10
+          selector:
+            number:
+              min: 0
+              max: 60
+              step: 1
+              unit_of_measurement: min
+              mode: slider
+    section_urlaub:
+      name: Urlaub
+      icon: mdi:beach
+      input:
+        vacation_boolean:
+          name: Urlaubs-Schalter
+          description: 'Wenn ON, wird die Klimaanlage komplett gesperrt (off) und
+            das Thermostat ausgeschaltet. Frostschutz übernimmt das Thermostat selbst.
+
+            '
+          default: input_boolean.urlaub
+          selector:
+            entity:
+              domain:
+              - input_boolean
+              - binary_sensor
+              reorder: false
+              multiple: false
+        vacation_required:
+          name: Urlaubsmodus aktiv
+          description: Wenn aus, wird der Urlaubsschalter ignoriert.
+          default: true
+          selector:
+            boolean: {}
+    section_selbstregelung:
+      name: Selbstregelung
+      icon: mdi:autorenew
+      input:
+        self_regulate:
+          name: Selbstregelung erlauben
+          description: 'Wenn aktiv, wird das automatische Abschalten beim Wegfall
+            der Trigger-Bedingung unterdrückt — die Klimaanlage darf intern selbst
+            zur Zieltemperatur regeln. Fenster-offen schaltet weiterhin ab (Sicherheit).
+
+            '
+          default: true
+          selector:
+            boolean: {}
+    section_zeit:
+      name: Zeitfenster
+      icon: mdi:clock-outline
+      input:
+        time_start:
+          name: Aktiv ab
+          description: Früheste Uhrzeit für automatisches Einschalten
+          default: 07:00:00
+          selector:
+            time: {}
+        time_end:
+          name: Aktiv bis
+          description: Späteste Uhrzeit für automatisches Einschalten
+          default: '22:00:00'
+          selector:
+            time: {}
+    section_effizienz:
+      name: Effizienz
+      icon: mdi:leaf
+      input:
+        cool_max_delta_t:
+          name: Max. Δ Innen−Außen Kühlen (°C)
+          description: 'Adaptiver Target: Innentemperatur wird nie tiefer als (Außentemp.
+            − dieser Wert) gekühlt. Bei 30 °C draußen und Δ=7 → effektiver Target
+            ≥ 23 °C statt 21 °C. Schont Kompressor + Gesundheit, spart 15-25 %.
+
+            '
+          default: 7.0
+          selector:
+            number:
+              min: 4.0
+              max: 12.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        min_cycle_minutes:
+          name: Min. Pause nach Aus (Minuten)
+          description: 'Klimaanlage darf nach dem Abschalten frühestens nach X Minuten
+            wieder starten. Verhindert Kurztakten (Kompressor-Schutz + Effizienz).
+
+            '
+          default: 5
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              unit_of_measurement: min
+              mode: slider
+    section_kuehlen:
+      name: Kühlen
+      icon: mdi:snowflake
+      input:
+        cool_enabled:
+          name: Kühlen aktivieren
+          default: true
+          selector:
+            boolean: {}
+        cool_room_trigger:
+          name: Raumtemp. Einschaltgrenze (°C)
+          description: Kühlen starten wenn Raumtemperatur diesen Wert übersteigt
+          default: 26.0
+          selector:
+            number:
+              min: 20.0
+              max: 35.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        cool_outdoor_min:
+          name: Außentemp. Mindestgrenze (°C)
+          description: 'Kühlen nur wenn Außentemperatur über diesem Wert. Verhindert
+            Kühlen im Frühjahr/Herbst wenn Lüften sinnvoller wäre.
+
+            '
+          default: 18.0
+          selector:
+            number:
+              min: 10.0
+              max: 30.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        cool_target_temp:
+          name: Zieltemperatur Kühlen (°C)
+          default: 23.0
+          selector:
+            number:
+              min: 16.0
+              max: 28.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        cool_hysteresis:
+          name: Hysterese Kühlen (°C)
+          description: Abschalten wenn Raumtemp. ≤ Ziel − Hysterese
+          default: 1.5
+          selector:
+            number:
+              min: 0.5
+              max: 5.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+    section_heizen:
+      name: Heizen
+      icon: mdi:fire
+      input:
+        heat_enabled:
+          name: Heizen aktivieren
+          default: true
+          selector:
+            boolean: {}
+        heat_room_trigger:
+          name: Raumtemp. Einschaltgrenze (°C)
+          description: Heizen starten wenn Raumtemperatur unter diesen Wert fällt
+          default: 18.0
+          selector:
+            number:
+              min: 10.0
+              max: 24.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        heat_outdoor_max:
+          name: Außentemp. Obergrenze Heizen (°C)
+          description: Heizen nur wenn Außentemperatur unter diesem Wert
+          default: 12.0
+          selector:
+            number:
+              min: 5.0
+              max: 20.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        heat_outdoor_min:
+          name: Außentemp. Effizienzgrenze (°C)
+          description: 'Nicht heizen wenn Außentemperatur darunter liegt (COP zu schlecht
+            → Fußbodenheizung effizienter).
+
+            '
+          default: -10.0
+          selector:
+            number:
+              min: -25.0
+              max: 0.0
+              step: 1.0
+              unit_of_measurement: °C
+              mode: slider
+        heat_target_temp:
+          name: Zieltemperatur Heizen (°C)
+          default: 21.0
+          selector:
+            number:
+              min: 16.0
+              max: 26.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+        heat_hysteresis:
+          name: Hysterese Heizen (°C)
+          description: Abschalten wenn Raumtemp. ≥ Ziel + Hysterese
+          default: 1.0
+          selector:
+            number:
+              min: 0.5
+              max: 5.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
+mode: single
+max_exceeded: silent
+trigger:
+- trigger: state
+  entity_id: !input room_temp_sensor
+  id: temp_change
+- trigger: state
+  entity_id: !input outdoor_temp_sensor
+  id: temp_change
+- trigger: time_pattern
+  minutes: /10
+  id: temp_change
+- trigger: state
+  entity_id: !input window_sensor
+  to: 'on'
+  id: window_opened
+- trigger: state
+  entity_id: !input window_sensor
+  to: 'off'
+  id: window_closed
+- trigger: state
+  entity_id: !input presence_sensor
+  to: 'off'
+  id: presence_left
+- trigger: state
+  entity_id: !input presence_sensor
+  to: 'on'
+  id: presence_arrived
+- trigger: state
+  entity_id: !input room_presence_sensor
+  to: 'on'
+  id: room_presence_arrived
+- trigger: state
+  entity_id: !input room_presence_sensor
+  to: 'off'
+  for:
+    minutes: !input room_presence_grace_minutes
+  id: room_presence_left
+- trigger: state
+  entity_id: !input vacation_boolean
+  to: 'on'
+  id: vacation_started
+- trigger: state
+  entity_id: !input vacation_boolean
+  to: 'off'
+  id: vacation_ended
+- trigger: homeassistant
+  event: start
+  id: temp_change
+- trigger: event
+  event_type: automation_reloaded
+  id: temp_change
+- trigger: time
+  at: !input time_start
+  id: time_window_start
+- trigger: time
+  at: !input time_end
+  id: time_window_end
+variables:
+  _room_sensor: !input room_temp_sensor
+  _outdoor_sensor: !input outdoor_temp_sensor
+  _climate: !input climate_entity
+  _thermostat: !input thermostat_entity
+  _window: !input window_sensor
+  _presence: !input presence_sensor
+  _presence_required: !input presence_required
+  _room_presence: !input room_presence_sensor
+  _room_presence_required: !input room_presence_required
+  _room_presence_grace: !input room_presence_grace_minutes
+  _vacation: !input vacation_boolean
+  _vacation_required: !input vacation_required
+  _cool_max_delta: !input cool_max_delta_t
+  _min_cycle: !input min_cycle_minutes
+  _self_regulate: !input self_regulate
+  _cool_enabled: !input cool_enabled
+  _heat_enabled: !input heat_enabled
+  _cool_trigger: !input cool_room_trigger
+  _cool_outdoor_min: !input cool_outdoor_min
+  _cool_target: !input cool_target_temp
+  _cool_hyst: !input cool_hysteresis
+  _heat_trigger: !input heat_room_trigger
+  _heat_outdoor_max: !input heat_outdoor_max
+  _heat_outdoor_min: !input heat_outdoor_min
+  _heat_target: !input heat_target_temp
+  _heat_hyst: !input heat_hysteresis
+  _time_start: !input time_start
+  _time_end: !input time_end
+condition:
+- condition: template
+  value_template: '{{ states(_room_sensor) not in [''unavailable'', ''unknown'', ''none'']
+    }}
+
+    '
+- condition: template
+  value_template: '{{ states(_outdoor_sensor) not in [''unavailable'', ''unknown'',
+    ''none''] }}
+
+    '
+- condition: template
+  value_template: '{{ states(_climate) not in [''unavailable'', ''unknown''] }}
+
+    '
+action:
+- variables:
+    room_temp: '{{ states(_room_sensor) | float(20) }}'
+    outdoor_temp: '{{ states(_outdoor_sensor) | float(15) }}'
+    current_mode: '{{ states(_climate) }}'
+    in_time_window: '{{ today_at(_time_start) <= now() < today_at(_time_end) }}'
+    window_open: "{{ _window not in [none, '']\n   and is_state(_window | string,
+      'on') }}\n"
+    nobody_home: "{{ _presence_required\n   and _presence not in [none, '']\n   and
+      is_state(_presence | string, 'off') }}\n"
+    room_empty: "{{ _room_presence_required\n   and _room_presence not in [none, '']\n
+      \  and is_state(_room_presence | string, 'off') }}\n"
+    no_presence: '{{ nobody_home or room_empty }}'
+    is_vacation: "{{ _vacation_required\n   and _vacation not in [none, '']\n   and
+      is_state(_vacation | string, 'on') }}\n"
+    effective_cool_target: "{{ [_cool_target, (outdoor_temp - _cool_max_delta)] |
+      max | round(1) }}\n"
+    last_off_seconds: "{{ (now() - states[_climate].last_changed).total_seconds()\n
+      \  if states[_climate] is not none else 99999 }}\n"
+    cycle_ready: "{{ current_mode != 'off' or last_off_seconds >= (_min_cycle * 60)
+      }}\n"
+    has_thermostat: '{{ _thermostat not in [none, ''''] }}'
+    self_regulate: '{{ _self_regulate }}'
+    thermostat_in_heat_range: '{{ outdoor_temp <= _heat_outdoor_max }}'
+    want_cool: "{{ _cool_enabled\n   and not window_open\n   and not no_presence\n
+      \  and not is_vacation\n   and outdoor_temp >= _cool_outdoor_min\n   and room_temp
+      >= _cool_trigger }}\n"
+    want_heat: "{{ _heat_enabled\n   and not window_open\n   and not no_presence\n
+      \  and not is_vacation\n   and outdoor_temp <= _heat_outdoor_max\n   and outdoor_temp
+      >= _heat_outdoor_min\n   and room_temp <= _heat_trigger }}\n"
+    cool_done: '{{ room_temp <= (effective_cool_target - _cool_hyst) }}'
+    heat_done: '{{ room_temp >= (_heat_target + _heat_hyst) }}'
+- choose:
+  - conditions:
+    - condition: template
+      value_template: "{{ is_vacation and current_mode not in ['off', 'unavailable'] }}"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+    - if:
+      - condition: template
+        value_template: '{{ has_thermostat }}'
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: '{{ _thermostat }}'
+        data:
+          hvac_mode: 'off'
+  - conditions:
+    - condition: trigger
+      id: window_opened
+    - condition: template
+      value_template: '{{ current_mode not in [''off'', ''unavailable''] }}'
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+  - conditions:
+    - condition: template
+      value_template: "{{ no_presence and current_mode not in ['off', 'unavailable'] }}"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+  - conditions:
+    - condition: template
+      value_template: "{{ not in_time_window and current_mode not in ['off', 'unavailable'] }}"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+    - if:
+      - condition: template
+        value_template: "{{ has_thermostat and thermostat_in_heat_range and not window_open }}"
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: '{{ _thermostat }}'
+        data:
+          hvac_mode: heat
+  - conditions:
+    - condition: template
+      value_template: "{{ want_cool\n   and not cool_done\n   and in_time_window\n
+        \  and cycle_ready\n   and current_mode not in ['cool', 'unavailable'] }}\n"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: cool
+    - action: climate.set_temperature
+      target:
+        entity_id: !input climate_entity
+      data:
+        temperature: '{{ effective_cool_target }}'
+    - if:
+      - condition: template
+        value_template: '{{ has_thermostat }}'
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: '{{ _thermostat }}'
+        data:
+          hvac_mode: 'off'
+  - conditions:
+    - condition: template
+      value_template: "{{ want_heat\n   and not heat_done\n   and in_time_window\n
+        \  and cycle_ready\n   and current_mode not in ['heat', 'unavailable'] }}\n"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: heat
+    - action: climate.set_temperature
+      target:
+        entity_id: !input climate_entity
+      data:
+        temperature: !input heat_target_temp
+    - if:
+      - condition: template
+        value_template: '{{ has_thermostat }}'
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: '{{ _thermostat }}'
+        data:
+          hvac_mode: 'off'
+  - conditions:
+    - condition: template
+      value_template: "{{ current_mode == 'cool'\n   and (cool_done or not want_cool)\n
+        \  and not self_regulate }}\n"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+    - if:
+      - condition: template
+        value_template: '{{ has_thermostat and thermostat_in_heat_range and not window_open
+          }}
+
+          '
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: '{{ _thermostat }}'
+        data:
+          hvac_mode: heat
+  - conditions:
+    - condition: template
+      value_template: "{{ current_mode == 'heat'\n   and (heat_done or not want_heat)\n
+        \  and not self_regulate }}\n"
+    sequence:
+    - action: climate.set_hvac_mode
+      target:
+        entity_id: !input climate_entity
+      data:
+        hvac_mode: 'off'
+    - if:
+      - condition: template
+        value_template: '{{ has_thermostat and thermostat_in_heat_range and not window_open
+          }}
+
+          '
+      then:
+      - action: climate.set_hvac_mode
+        target:
+          entity_id: '{{ _thermostat }}'
+        data:
+          hvac_mode: heat
