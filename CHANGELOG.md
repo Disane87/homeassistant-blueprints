@@ -4,6 +4,9 @@ Alle nennenswerten Änderungen an diesem Repo. Format: [Keep a Changelog](https:
 
 ## [Unreleased]
 
+### Added
+- **`klimaanlage-smart-control.yaml`**: Neuer Schalter `cool_adaptive_target_enabled` (Default `true`, backward compatible). Wenn aus, wird der eingestellte `cool_target_temp` IMMER verwendet — der adaptive Clamp gegen die Außentemperatur (`outdoor − cool_max_delta_t`) entfällt. Use-Case: bei 35 °C draußen wirklich auf 23 °C kühlen statt nur auf 28 °C.
+
 ## [2026-05-26] — Klimaanlage Smart Control Release 🎉
 
 ### Added

@@ -201,11 +201,24 @@ blueprint:
       name: Effizienz
       icon: mdi:leaf
       input:
+        cool_adaptive_target_enabled:
+          name: Adaptiver Cooling-Target aktiv
+          description: 'Wenn aktiv, wird die Innentemperatur nie tiefer als (Außentemp.
+            − Δ) gekühlt (siehe nächster Wert). Schont Kompressor und Gesundheit.
+            Aus = der eingestellte Zieltemperatur-Wert wird IMMER verwendet, unabhängig
+            von der Außentemperatur (bei 35 °C draußen wird also auch wirklich auf
+            z.B. 23 °C gekühlt).
+
+            '
+          default: true
+          selector:
+            boolean: {}
         cool_max_delta_t:
           name: Max. Δ Innen−Außen Kühlen (°C)
-          description: 'Adaptiver Target: Innentemperatur wird nie tiefer als (Außentemp.
-            − dieser Wert) gekühlt. Bei 30 °C draußen und Δ=7 → effektiver Target
-            ≥ 23 °C statt 21 °C. Schont Kompressor + Gesundheit, spart 15-25 %.
+          description: 'Nur wirksam wenn „Adaptiver Cooling-Target aktiv" eingeschaltet
+            ist. Innentemperatur wird nie tiefer als (Außentemp. − dieser Wert) gekühlt.
+            Bei 30 °C draußen und Δ=7 → effektiver Target ≥ 23 °C statt 21 °C. Schont
+            Kompressor + Gesundheit, spart 15-25 %.
 
             '
           default: 7.0
@@ -422,6 +435,7 @@ variables:
   _room_presence_grace: !input room_presence_grace_minutes
   _vacation: !input vacation_boolean
   _vacation_required: !input vacation_required
+  _cool_adaptive_enabled: !input cool_adaptive_target_enabled
   _cool_max_delta: !input cool_max_delta_t
   _min_cycle: !input min_cycle_minutes
   _self_regulate: !input self_regulate
@@ -468,8 +482,8 @@ action:
     no_presence: '{{ nobody_home or room_empty }}'
     is_vacation: "{{ _vacation_required\n   and _vacation not in [none, '']\n   and
       is_state(_vacation | string, 'on') }}\n"
-    effective_cool_target: "{{ [_cool_target, (outdoor_temp - _cool_max_delta)] |
-      max | round(1) }}\n"
+    effective_cool_target: "{{ ([_cool_target, (outdoor_temp - _cool_max_delta)] |
+      max | round(1)) if _cool_adaptive_enabled else _cool_target }}\n"
     last_off_seconds: "{{ (now() - states[_climate].last_changed).total_seconds()\n
       \  if states[_climate] is not none else 99999 }}\n"
     cycle_ready: "{{ current_mode != 'off' or last_off_seconds >= (_min_cycle * 60)

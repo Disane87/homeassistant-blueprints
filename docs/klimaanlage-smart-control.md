@@ -66,7 +66,8 @@ Genau das macht der Blueprint.
 
 | Input | Default | Beschreibung |
 |---|---|---|
-| `cool_max_delta_t` | `7.0` °C | Δ Innen−Außen wird beim Kühlen begrenzt. Bei 30 °C draußen und Δ=7 → effektiver Cooling-Target ≥ 23 °C. Schont Kompressor + Gesundheit, spart 15–25 %. |
+| `cool_adaptive_target_enabled` | `true` | Schaltet den adaptiven Cooling-Target an/aus. Aus = der eingestellte `cool_target_temp` wird IMMER verwendet, unabhängig von der Außentemperatur (bei 35 °C draußen wird wirklich auf z.B. 23 °C gekühlt). |
+| `cool_max_delta_t` | `7.0` °C | Nur wirksam wenn `cool_adaptive_target_enabled = true`. Δ Innen−Außen wird beim Kühlen begrenzt. Bei 30 °C draußen und Δ=7 → effektiver Cooling-Target ≥ 23 °C. Schont Kompressor + Gesundheit, spart 15–25 %. |
 | `min_cycle_minutes` | `5` min | Mindest-Pause nach AC-Aus, bevor sie wieder starten darf. Verhindert Kurztakten. |
 
 ### Kühlen
@@ -76,7 +77,7 @@ Genau das macht der Blueprint.
 | `cool_enabled` | `true` | Kühl-Logik global an/aus. |
 | `cool_room_trigger` | `26.0` °C | Raumtemp.-Schwelle, ab der gekühlt wird. |
 | `cool_outdoor_min` | `18.0` °C | Mindest-Außentemperatur, sonst lieber lüften. |
-| `cool_target_temp` | `23.0` °C | Basis-Target. Kann durch `cool_max_delta_t` nach oben angehoben werden. |
+| `cool_target_temp` | `23.0` °C | Basis-Target. Kann durch `cool_max_delta_t` nach oben angehoben werden — aber nur wenn `cool_adaptive_target_enabled` aktiv ist. |
 | `cool_hysteresis` | `1.5` °C | Aus bei Raumtemp. ≤ Effektiv-Target − Hysterese. |
 
 ### Heizen
@@ -120,7 +121,9 @@ Erst danach kommt überhaupt die Frage *kühlen oder heizen*:
   `cool_enabled` ∧ kein Fenster auf ∧ Anwesenheit ok ∧ Außentemp ≥ Mindest ∧ Raumtemp ≥ Trigger
 - **Heizen,** wenn:
   `heat_enabled` ∧ kein Fenster auf ∧ Anwesenheit ok ∧ Außentemp ≤ Obergrenze ∧ Außentemp ≥ Effizienzgrenze ∧ Raumtemp ≤ Trigger
-- **Effektiver Cooling-Target:** `max(cool_target_temp, outdoor_temp − cool_max_delta_t)`
+- **Effektiver Cooling-Target:**
+  - Wenn `cool_adaptive_target_enabled = true` (Default): `max(cool_target_temp, outdoor_temp − cool_max_delta_t)`
+  - Wenn `cool_adaptive_target_enabled = false`: `cool_target_temp` (fest, ohne Außentemperatur-Clamp)
 - **Cycle-Check:** Wenn der aktuelle Zustand der Klima `off` ist, prüft die Logik, wie lange das schon so ist. Erst nach `min_cycle_minutes` darf wieder gestartet werden.
 
 ### Fußbodenheizung
