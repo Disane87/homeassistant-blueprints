@@ -2,8 +2,13 @@ blueprint:
   name: Klimaanlage Smart Control
   description: 'Steuert eine Split-Klimaanlage intelligent basierend auf Raum- und
     Außentemperatur. Optionale Fußbodenheizungs-Koordination (wird abgeschaltet wenn
-    die Klimaanlage läuft) und Fenstersensor-Unterstützung (AC stoppt bei geöffnetem
-    Fenster und startet nicht erneut bis es geschlossen ist).
+    die Klimaanlage läuft), Fenstersensor-Unterstützung (AC stoppt bei geöffnetem
+    Fenster und startet nicht erneut bis es geschlossen ist), Haus- und Raum-Präsenz,
+    Urlaubs-Sperre, adaptiver Cooling-Target, Selbstregelung, sowie optionale
+    Modi-Phasen (Eco / Super-Boost beim Start / Sleep-Mode mit Profilauswahl) mit
+    Wochentag-Filter. Manuelle Eingriffe (UI / App / Voice) werden via context.user_id
+    erkannt und überschreiben die Automation bis zum nächsten Aktiv-Zeitfenster —
+    nur Urlaub und Fenster-offen bleiben harte Safety-Overrides.
 
     '
   domain: automation
@@ -14,7 +19,12 @@ blueprint:
       icon: mdi:air-conditioner
       input:
         climate_entity:
-          name: Klimaanlage (ConnectLife)
+          name: Klimaanlage
+          description: 'Climate-Entity der Split-Klimaanlage. Getestet mit ConnectLife
+            (Hisense / AEG), sollte aber mit jeder Integration funktionieren die
+            climate.set_hvac_mode + climate.set_temperature unterstützt.
+
+            '
           selector:
             entity:
               domain:
@@ -23,10 +33,8 @@ blueprint:
               multiple: false
         room_temp_sensor:
           name: Raumtemperatursensor
-          description: 'Büro Marco → sensor.klimasensor_buro_marco_temperature Malian     →
-            sensor.klimasensor_kinderzimmer_temperature
-
-            '
+          description: Sensor der die Temperatur des Raums misst in dem die Klimaanlage
+            steht.
           selector:
             entity:
               domain:
@@ -37,7 +45,9 @@ blueprint:
               multiple: false
         outdoor_temp_sensor:
           name: Außentemperatursensor
-          default: sensor.klima_wohnzimmer_wetter_garten_temperature
+          description: Sensor der die Außentemperatur misst. Wird für Schwellenwert-
+            Checks (Heizen/Kühlen sinnvoll?) und für den adaptiven Cooling-Target
+            verwendet.
           selector:
             entity:
               domain:
@@ -92,7 +102,7 @@ blueprint:
             jemand zuhause, ''off'' = niemand zuhause.
 
             '
-          default: binary_sensor.family_presence
+          default:
           selector:
             entity:
               domain:
@@ -110,11 +120,11 @@ blueprint:
           name: Raumpräsenzsensor (optional)
           description: 'Zusätzlicher Sensor für die Raumebene (z.B. mmWave/PIR). AC
             läuft nur wenn jemand im Raum ist. ''on'' = Person im Raum, ''off'' =
-            niemand im Raum. Default fällt auf den Haus-Anwesenheitssensor zurück
-            (= keine Raum-Ebene aktiv).
+            niemand im Raum. Leer lassen oder "Raumpräsenz erforderlich" deaktivieren
+            um die Raum-Ebene zu überspringen.
 
             '
-          default: binary_sensor.family_presence
+          default:
           selector:
             entity:
               domain:
@@ -153,7 +163,7 @@ blueprint:
             das Thermostat ausgeschaltet. Frostschutz übernimmt das Thermostat selbst.
 
             '
-          default: input_boolean.urlaub
+          default:
           selector:
             entity:
               domain:
@@ -197,6 +207,167 @@ blueprint:
           default: '22:00:00'
           selector:
             time: {}
+    section_modi:
+      name: Modi (Eco / Super / Sleep)
+      icon: mdi:tune-variant
+      input:
+        eco_switch:
+          name: Eco-Switch (optional)
+          description: 'Switch der den Eco-Modus der Klimaanlage steuert (typisch von
+            der ConnectLife-Integration als switch.<ac_name>_eco bereitgestellt).
+            Wird in der konfigurierten Eco-Phase automatisch eingeschaltet, sonst
+            ausgeschaltet. Ist die Klimaanlage aus, wird Eco ebenfalls deaktiviert.
+
+            '
+          default:
+          selector:
+            entity:
+              domain:
+              - switch
+              reorder: false
+              multiple: false
+        eco_enabled:
+          name: Eco-Phase aktiv
+          description: 'Wenn aus, wird die Eco-Phase ignoriert (Eco-Switch wird nie automatisch
+            gesetzt).
+
+            '
+          default: false
+          selector:
+            boolean: {}
+        eco_time_start:
+          name: Eco-Phase ab
+          description: Uhrzeit ab der Eco aktiviert wird (nur wenn AC läuft).
+          default: '20:00:00'
+          selector:
+            time: {}
+        eco_time_end:
+          name: Eco-Phase bis
+          description: 'Uhrzeit ab der Eco wieder deaktiviert wird. Eco und Sleep dürfen
+            sich überlappen — beide laufen dann parallel.
+
+            '
+          default: '22:00:00'
+          selector:
+            time: {}
+        super_switch:
+          name: Super/Turbo-Switch (optional)
+          description: 'Switch der den Super-/Turbo-Modus der Klimaanlage steuert (typisch
+            switch.<ac_name>_super). Wird kurz nach dem automatischen Anschalten der
+            Kühlung für X Minuten aktiviert (siehe Boost-Dauer), um schnell auf
+            Zieltemperatur zu kommen.
+
+            '
+          default:
+          selector:
+            entity:
+              domain:
+              - switch
+              reorder: false
+              multiple: false
+        boost_enabled:
+          name: Boost (Super) beim Start
+          description: 'Wenn aktiv, wird Super in den ersten X Minuten nach dem automatischen
+            Einschalten der Kühlung aktiviert.
+
+            '
+          default: false
+          selector:
+            boolean: {}
+        boost_minutes:
+          name: Boost-Dauer (Minuten)
+          description: Wie lange Super nach dem Einschalten an bleibt.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 30
+              step: 1
+              unit_of_measurement: min
+              mode: slider
+        sleep_select:
+          name: Sleep-Mode-Select (optional)
+          description: 'Select-Entity die den Sleep-Modus der Klimaanlage steuert
+            (typisch select.<ac_name>_sleep_mode bei ConnectLife). Erwartete Optionen:
+            off / general / for_old / for_young / for_kid.
+
+            '
+          default:
+          selector:
+            entity:
+              domain:
+              - select
+              reorder: false
+              multiple: false
+        sleep_enabled:
+          name: Sleep-Phase aktiv
+          description: Wenn aus, wird die Sleep-Phase ignoriert (Sleep-Select wird nie
+            automatisch gesetzt).
+          default: false
+          selector:
+            boolean: {}
+        sleep_profile:
+          name: Sleep-Profil
+          description: 'Welches Sleep-Profil in der Sleep-Phase gesetzt wird. Profile
+            entsprechen den vom Gerät angebotenen Sleep-Kurven: general (Standard-
+            Erwachsene), for_old (Senioren), for_young (Jugendliche/junge Erwachsene),
+            for_kid (Kinder — langsamerer Temperatur-Drift, leiser Lüfter).
+
+            '
+          default: general
+          selector:
+            select:
+              options:
+              - general
+              - for_old
+              - for_young
+              - for_kid
+        sleep_time_start:
+          name: Sleep-Phase ab
+          description: Uhrzeit ab der Sleep-Modus aktiviert wird (nur wenn AC läuft).
+          default: '21:00:00'
+          selector:
+            time: {}
+        sleep_time_end:
+          name: Sleep-Phase bis
+          description: Uhrzeit ab der Sleep wieder deaktiviert wird (z.B. gleich dem
+            globalen time_end).
+          default: '22:00:00'
+          selector:
+            time: {}
+        modi_weekdays:
+          name: Modi-Wochentage
+          description: 'Wochentage, an denen Eco- und Sleep-Phase aktiv sind. Typischer
+            Use-Case: Kinderzimmer nur an Schulabenden (Mo/Di/Mi/Do/So), an Wochenenden
+            (Fr/Sa) ist das Kind ggf. nicht im Zimmer. Leer lassen = jeden Tag aktiv.
+
+            '
+          default:
+          - mon
+          - tue
+          - wed
+          - thu
+          - fri
+          - sat
+          - sun
+          selector:
+            select:
+              multiple: true
+              options:
+              - label: Montag
+                value: mon
+              - label: Dienstag
+                value: tue
+              - label: Mittwoch
+                value: wed
+              - label: Donnerstag
+                value: thu
+              - label: Freitag
+                value: fri
+              - label: Samstag
+                value: sat
+              - label: Sonntag
+                value: sun
     section_effizienz:
       name: Effizienz
       icon: mdi:leaf
@@ -422,6 +593,21 @@ trigger:
 - trigger: time
   at: !input time_end
   id: time_window_end
+- trigger: time
+  at: !input eco_time_start
+  id: eco_window_start
+- trigger: time
+  at: !input eco_time_end
+  id: eco_window_end
+- trigger: time
+  at: !input sleep_time_start
+  id: sleep_window_start
+- trigger: time
+  at: !input sleep_time_end
+  id: sleep_window_end
+- trigger: time_pattern
+  minutes: /5
+  id: modi_tick
 variables:
   _room_sensor: !input room_temp_sensor
   _outdoor_sensor: !input outdoor_temp_sensor
@@ -452,6 +638,19 @@ variables:
   _heat_hyst: !input heat_hysteresis
   _time_start: !input time_start
   _time_end: !input time_end
+  _eco_switch: !input eco_switch
+  _eco_enabled: !input eco_enabled
+  _eco_start: !input eco_time_start
+  _eco_end: !input eco_time_end
+  _super_switch: !input super_switch
+  _boost_enabled: !input boost_enabled
+  _boost_minutes: !input boost_minutes
+  _sleep_select: !input sleep_select
+  _sleep_enabled: !input sleep_enabled
+  _sleep_profile: !input sleep_profile
+  _sleep_start: !input sleep_time_start
+  _sleep_end: !input sleep_time_end
+  _modi_weekdays: !input modi_weekdays
 condition:
 - condition: template
   value_template: '{{ states(_room_sensor) not in [''unavailable'', ''unknown'', ''none'']
@@ -499,6 +698,17 @@ action:
       >= _heat_outdoor_min\n   and room_temp <= _heat_trigger }}\n"
     cool_done: '{{ room_temp <= (effective_cool_target - _cool_hyst) }}'
     heat_done: '{{ room_temp >= (_heat_target + _heat_hyst) }}'
+    climate_running: "{{ current_mode in ['cool', 'heat', 'dry', 'fan_only', 'auto'] }}"
+    weekday_short: "{{ now().strftime('%a').lower() }}"
+    weekday_ok: "{{ (_modi_weekdays | length) == 0 or weekday_short in _modi_weekdays }}"
+    in_eco_window: "{% set s = today_at(_eco_start) %}{% set e = today_at(_eco_end) %}{% if s <= e %}{{ s <= now() < e }}{% else %}{{ now() >= s or now() < e }}{% endif %}"
+    in_sleep_window: "{% set s = today_at(_sleep_start) %}{% set e = today_at(_sleep_end) %}{% if s <= e %}{{ s <= now() < e }}{% else %}{{ now() >= s or now() < e }}{% endif %}"
+    has_eco_switch: "{{ _eco_switch not in [none, ''] }}"
+    has_super_switch: "{{ _super_switch not in [none, ''] }}"
+    has_sleep_select: "{{ _sleep_select not in [none, ''] }}"
+    cool_active_seconds: "{{ (now() - states[_climate].last_changed).total_seconds() if (states[_climate] is not none and current_mode == 'cool') else 0 }}"
+    in_boost_window: "{{ _boost_enabled and current_mode == 'cool' and cool_active_seconds <= (_boost_minutes * 60) }}"
+    manual_override: "{% set s = states[_climate] %}{% if s is none %}false{% elif s.context.user_id is none %}false{% elif s.last_changed < today_at(_time_start) %}false{% else %}true{% endif %}"
 - choose:
   - conditions:
     - condition: template
@@ -531,7 +741,7 @@ action:
         hvac_mode: 'off'
   - conditions:
     - condition: template
-      value_template: "{{ no_presence and current_mode not in ['off', 'unavailable'] }}"
+      value_template: "{{ no_presence and not manual_override and current_mode not in ['off', 'unavailable'] }}"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -540,7 +750,7 @@ action:
         hvac_mode: 'off'
   - conditions:
     - condition: template
-      value_template: "{{ not in_time_window and current_mode not in ['off', 'unavailable'] }}"
+      value_template: "{{ not in_time_window and not manual_override and current_mode not in ['off', 'unavailable'] }}"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -559,7 +769,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ want_cool\n   and not cool_done\n   and in_time_window\n
-        \  and cycle_ready\n   and current_mode not in ['cool', 'unavailable'] }}\n"
+        \  and cycle_ready\n   and not manual_override\n   and current_mode not in ['cool', 'unavailable'] }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -583,7 +793,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ want_heat\n   and not heat_done\n   and in_time_window\n
-        \  and cycle_ready\n   and current_mode not in ['heat', 'unavailable'] }}\n"
+        \  and cycle_ready\n   and not manual_override\n   and current_mode not in ['heat', 'unavailable'] }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -607,7 +817,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ current_mode == 'cool'\n   and (cool_done or not want_cool)\n
-        \  and not self_regulate }}\n"
+        \  and not self_regulate\n   and not manual_override }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -629,7 +839,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ current_mode == 'heat'\n   and (heat_done or not want_heat)\n
-        \  and not self_regulate }}\n"
+        \  and not self_regulate\n   and not manual_override }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -648,3 +858,72 @@ action:
           entity_id: '{{ _thermostat }}'
         data:
           hvac_mode: heat
+- variables:
+    current_mode_after: '{{ states(_climate) }}'
+    climate_running_after: "{{ current_mode_after in ['cool', 'heat', 'dry', 'fan_only', 'auto'] }}"
+    cool_active_seconds_after: "{{ (now() - states[_climate].last_changed).total_seconds() if (states[_climate] is not none and current_mode_after == 'cool') else 0 }}"
+    in_boost_window_after: "{{ _boost_enabled and current_mode_after == 'cool' and cool_active_seconds_after <= (_boost_minutes * 60) }}"
+- if:
+  - condition: template
+    value_template: "{{ has_super_switch and not manual_override }}"
+  then:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: "{{ in_boost_window_after and weekday_ok and is_state(_super_switch | string, 'off') }}"
+      sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: '{{ _super_switch }}'
+    - conditions:
+      - condition: template
+        value_template: "{{ (not in_boost_window_after or not weekday_ok or not climate_running_after) and is_state(_super_switch | string, 'on') }}"
+      sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: '{{ _super_switch }}'
+- if:
+  - condition: template
+    value_template: "{{ has_eco_switch and not manual_override }}"
+  then:
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: "{{ _eco_enabled and in_eco_window and weekday_ok and climate_running_after and is_state(_eco_switch | string, 'off') }}"
+      sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: '{{ _eco_switch }}'
+    - conditions:
+      - condition: template
+        value_template: "{{ (not _eco_enabled or not in_eco_window or not weekday_ok or not climate_running_after) and is_state(_eco_switch | string, 'on') }}"
+      sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: '{{ _eco_switch }}'
+- if:
+  - condition: template
+    value_template: "{{ has_sleep_select and not manual_override }}"
+  then:
+  - variables:
+      current_sleep: "{{ states(_sleep_select) }}"
+      want_sleep: "{{ _sleep_enabled and in_sleep_window and weekday_ok and climate_running_after }}"
+  - choose:
+    - conditions:
+      - condition: template
+        value_template: "{{ want_sleep and current_sleep != _sleep_profile }}"
+      sequence:
+      - action: select.select_option
+        target:
+          entity_id: '{{ _sleep_select }}'
+        data:
+          option: '{{ _sleep_profile }}'
+    - conditions:
+      - condition: template
+        value_template: "{{ not want_sleep and current_sleep != 'off' }}"
+      sequence:
+      - action: select.select_option
+        target:
+          entity_id: '{{ _sleep_select }}'
+        data:
+          option: 'off'
