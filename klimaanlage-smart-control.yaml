@@ -708,7 +708,7 @@ action:
     has_sleep_select: "{{ _sleep_select not in [none, ''] }}"
     cool_active_seconds: "{{ (now() - states[_climate].last_changed).total_seconds() if (states[_climate] is not none and current_mode == 'cool') else 0 }}"
     in_boost_window: "{{ _boost_enabled and current_mode == 'cool' and cool_active_seconds <= (_boost_minutes * 60) }}"
-    manual_override: "{% set s = states[_climate] %}{% if s is none %}false{% elif s.context.user_id is none %}false{% elif s.last_changed < today_at(_time_start) %}false{% else %}true{% endif %}"
+    manual_override: "{{ states[_climate] is not none and states[_climate].context.user_id is not none and states[_climate].last_changed >= today_at(_time_start) }}"
 - choose:
   - conditions:
     - condition: template
