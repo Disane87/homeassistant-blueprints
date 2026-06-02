@@ -5,7 +5,8 @@ blueprint:
     die Klimaanlage läuft), Fenstersensor-Unterstützung (AC stoppt bei geöffnetem
     Fenster und startet nicht erneut bis es geschlossen ist), Haus- und Raum-Präsenz,
     Urlaubs-Sperre, adaptiver Cooling-Target, Lüften-Vorrang (kein Einschalten wenn
-    es draußen deutlich kühler ist als im Raum), Selbstregelung, sowie optionale
+    es draußen deutlich kühler ist als im Raum, mit harter Kühl-Obergrenze gegen
+    interne Wärmequellen wie 3D-Drucker), Selbstregelung, sowie optionale
     Modi-Phasen (Eco / Super-Boost beim Start / Sleep-Mode mit Profilauswahl) mit
     Wochentag-Filter. Manuelle Eingriffe (UI / App / Voice) werden via context.user_id
     erkannt und überschreiben die Automation bis zum nächsten Aktiv-Zeitfenster —
@@ -477,6 +478,23 @@ blueprint:
               step: 0.5
               unit_of_measurement: °C
               mode: slider
+        cool_room_hard_max:
+          name: Harte Kühl-Obergrenze (°C)
+          description: 'Ab dieser Raumtemperatur wird IMMER gekühlt — der „Lüften-Vorrang"
+            wird ausgehebelt. Schützt vor internen Wärmequellen (3D-Drucker, PC, Sonne),
+            wenn Lüften die Hitze nicht abführt. Sollte über der Einschaltgrenze liegen;
+            der Lüften-Vorrang gilt dann nur im Band zwischen Einschaltgrenze und diesem
+            Wert.
+
+            '
+          default: 27.0
+          selector:
+            number:
+              min: 24.0
+              max: 32.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
         cool_target_temp:
           name: Zieltemperatur Kühlen (°C)
           default: 23.0
@@ -660,6 +678,7 @@ variables:
   _cool_outdoor_min: !input cool_outdoor_min
   _cool_vent_priority_enabled: !input cool_vent_priority_enabled
   _cool_vent_max_delta: !input cool_vent_max_delta
+  _cool_room_hard_max: !input cool_room_hard_max
   _cool_target: !input cool_target_temp
   _cool_hyst: !input cool_hysteresis
   _heat_trigger: !input heat_room_trigger
@@ -722,7 +741,7 @@ action:
     self_regulate: '{{ _self_regulate }}'
     thermostat_in_heat_range: '{{ outdoor_temp <= _heat_outdoor_max }}'
     vent_preferred: '{{ _cool_vent_priority_enabled and (room_temp - outdoor_temp)
-      > _cool_vent_max_delta }}'
+      > _cool_vent_max_delta and room_temp < _cool_room_hard_max }}'
     want_cool: "{{ _cool_enabled\n   and not window_open\n   and not no_presence\n
       \  and not is_vacation\n   and outdoor_temp >= _cool_outdoor_min\n   and room_temp
       >= _cool_trigger }}\n"
