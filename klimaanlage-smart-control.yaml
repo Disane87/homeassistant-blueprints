@@ -4,7 +4,8 @@ blueprint:
     Außentemperatur. Optionale Fußbodenheizungs-Koordination (wird abgeschaltet wenn
     die Klimaanlage läuft), Fenstersensor-Unterstützung (AC stoppt bei geöffnetem
     Fenster und startet nicht erneut bis es geschlossen ist), Haus- und Raum-Präsenz,
-    Urlaubs-Sperre, adaptiver Cooling-Target, Selbstregelung, sowie optionale
+    Urlaubs-Sperre, adaptiver Cooling-Target, Lüften-Vorrang (kein Einschalten wenn
+    es draußen deutlich kühler ist als im Raum), Selbstregelung, sowie optionale
     Modi-Phasen (Eco / Super-Boost beim Start / Sleep-Mode mit Profilauswahl) mit
     Wochentag-Filter. Manuelle Eingriffe (UI / App / Voice) werden via context.user_id
     erkannt und überschreiben die Automation bis zum nächsten Aktiv-Zeitfenster —
@@ -448,6 +449,34 @@ blueprint:
               step: 0.5
               unit_of_measurement: °C
               mode: slider
+        cool_vent_priority_enabled:
+          name: Lüften-Vorrang aktiv
+          description: 'Wenn aktiv, wird NICHT eingeschaltet solange es draußen deutlich
+            kühler ist als im Raum (Differenz größer als der nächste Wert) — dann ist
+            Lüften die effizientere Wahl. Greift nur beim automatischen Einschalten;
+            ein bereits laufender Kühlbetrieb wird davon nicht gestoppt. Bei Hitze
+            (außen wärmer als innen) ist die Differenz negativ → Kühlen immer erlaubt.
+
+            '
+          default: true
+          selector:
+            boolean: {}
+        cool_vent_max_delta:
+          name: Lüften-Vorrang ab Δ Innen−Außen (°C)
+          description: 'Nur wirksam wenn „Lüften-Vorrang aktiv". Das automatische Einschalten
+            der Kühlung wird unterdrückt sobald (Raumtemp. − Außentemp.) diesen Wert
+            übersteigt. Beispiel: Raum 23,5 °C, außen 18 °C → Δ 5,5 °C; bei Schwelle
+            4 °C wird nicht gekühlt sondern auf Lüften gesetzt.
+
+            '
+          default: 4.0
+          selector:
+            number:
+              min: 1.0
+              max: 12.0
+              step: 0.5
+              unit_of_measurement: °C
+              mode: slider
         cool_target_temp:
           name: Zieltemperatur Kühlen (°C)
           default: 23.0
@@ -629,6 +658,8 @@ variables:
   _heat_enabled: !input heat_enabled
   _cool_trigger: !input cool_room_trigger
   _cool_outdoor_min: !input cool_outdoor_min
+  _cool_vent_priority_enabled: !input cool_vent_priority_enabled
+  _cool_vent_max_delta: !input cool_vent_max_delta
   _cool_target: !input cool_target_temp
   _cool_hyst: !input cool_hysteresis
   _heat_trigger: !input heat_room_trigger
@@ -690,6 +721,8 @@ action:
     has_thermostat: '{{ _thermostat not in [none, ''''] }}'
     self_regulate: '{{ _self_regulate }}'
     thermostat_in_heat_range: '{{ outdoor_temp <= _heat_outdoor_max }}'
+    vent_preferred: '{{ _cool_vent_priority_enabled and (room_temp - outdoor_temp)
+      > _cool_vent_max_delta }}'
     want_cool: "{{ _cool_enabled\n   and not window_open\n   and not no_presence\n
       \  and not is_vacation\n   and outdoor_temp >= _cool_outdoor_min\n   and room_temp
       >= _cool_trigger }}\n"
@@ -769,7 +802,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ want_cool\n   and not cool_done\n   and in_time_window\n
-        \  and cycle_ready\n   and not manual_override\n   and current_mode not in ['cool', 'unavailable'] }}\n"
+        \  and cycle_ready\n   and not manual_override\n   and not vent_preferred\n   and current_mode not in ['cool', 'unavailable'] }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
