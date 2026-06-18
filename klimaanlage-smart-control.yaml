@@ -155,6 +155,23 @@ blueprint:
               step: 1
               unit_of_measurement: min
               mode: slider
+        room_presence_settle_minutes:
+          name: Raumpräsenz Einschaltverzögerung (Minuten)
+          description: 'Der Raum muss erst X Minuten DURCHGEHEND belegt sein, bevor
+            die Klimaanlage automatisch startet. Verhindert das Anspringen bei kurzem
+            Betreten (z.B. nur etwas holen). Verlässt man den Raum vor Ablauf der Zeit,
+            startet die AC nicht. 0 = sofort starten (keine Karenz). Wirkt nur auf das
+            Einschalten — eine bereits laufende AC bleibt unberührt.
+
+            '
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              unit_of_measurement: min
+              mode: slider
     section_urlaub:
       name: Urlaub
       icon: mdi:beach
@@ -613,6 +630,8 @@ trigger:
 - trigger: state
   entity_id: !input room_presence_sensor
   to: 'on'
+  for:
+    minutes: !input room_presence_settle_minutes
   id: room_presence_arrived
 - trigger: state
   entity_id: !input room_presence_sensor
@@ -666,6 +685,7 @@ variables:
   _room_presence: !input room_presence_sensor
   _room_presence_required: !input room_presence_required
   _room_presence_grace: !input room_presence_grace_minutes
+  _room_presence_settle: !input room_presence_settle_minutes
   _vacation: !input vacation_boolean
   _vacation_required: !input vacation_required
   _cool_adaptive_enabled: !input cool_adaptive_target_enabled
@@ -729,6 +749,7 @@ action:
     room_empty: "{{ _room_presence_required\n   and _room_presence not in [none, '']\n
       \  and is_state(_room_presence | string, 'off') }}\n"
     no_presence: '{{ nobody_home or room_empty }}'
+    room_settled: "{{ (not _room_presence_required) or (_room_presence in [none, '']) or (is_state(_room_presence | string, 'on') and (now() - states[_room_presence].last_changed).total_seconds() >= (_room_presence_settle * 60)) }}"
     is_vacation: "{{ _vacation_required\n   and _vacation not in [none, '']\n   and
       is_state(_vacation | string, 'on') }}\n"
     effective_cool_target: "{{ ([_cool_target, (outdoor_temp - _cool_max_delta)] |
@@ -760,7 +781,7 @@ action:
     has_sleep_select: "{{ _sleep_select not in [none, ''] }}"
     cool_active_seconds: "{{ (now() - states[_climate].last_changed).total_seconds() if (states[_climate] is not none and current_mode == 'cool') else 0 }}"
     in_boost_window: "{{ _boost_enabled and current_mode == 'cool' and cool_active_seconds <= (_boost_minutes * 60) }}"
-    manual_override: "{{ states[_climate] is not none and states[_climate].context.user_id is not none and states[_climate].last_changed >= today_at(_time_start) }}"
+    manual_override: "{% set ws = today_at(_time_start) %}{% set last_ws = ws if now() >= ws else ws - timedelta(days=1) %}{{ states[_climate] is not none and states[_climate].context.user_id is not none and states[_climate].last_changed >= last_ws }}"
 - choose:
   - conditions:
     - condition: template
@@ -821,7 +842,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ want_cool\n   and not cool_done\n   and in_time_window\n
-        \  and cycle_ready\n   and not manual_override\n   and not vent_preferred\n   and current_mode not in ['cool', 'unavailable'] }}\n"
+        \  and cycle_ready\n   and not manual_override\n   and not vent_preferred\n   and room_settled\n   and current_mode not in ['cool', 'unavailable'] }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
@@ -845,7 +866,7 @@ action:
   - conditions:
     - condition: template
       value_template: "{{ want_heat\n   and not heat_done\n   and in_time_window\n
-        \  and cycle_ready\n   and not manual_override\n   and current_mode not in ['heat', 'unavailable'] }}\n"
+        \  and cycle_ready\n   and not manual_override\n   and room_settled\n   and current_mode not in ['heat', 'unavailable'] }}\n"
     sequence:
     - action: climate.set_hvac_mode
       target:
