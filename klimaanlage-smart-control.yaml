@@ -746,8 +746,7 @@ action:
       'on') }}\n"
     nobody_home: "{{ _presence_required\n   and _presence not in [none, '']\n   and
       is_state(_presence | string, 'off') }}\n"
-    room_empty: "{{ _room_presence_required\n   and _room_presence not in [none, '']\n
-      \  and is_state(_room_presence | string, 'off') }}\n"
+    room_empty: "{{ _room_presence_required and _room_presence not in [none, ''] and is_state(_room_presence | string, 'off') and (now() - states[_room_presence].last_changed).total_seconds() >= (_room_presence_grace * 60) }}"
     no_presence: '{{ nobody_home or room_empty }}'
     room_settled: "{{ (not _room_presence_required) or (_room_presence in [none, '']) or (is_state(_room_presence | string, 'on') and (now() - states[_room_presence].last_changed).total_seconds() >= (_room_presence_settle * 60)) }}"
     is_vacation: "{{ _vacation_required\n   and _vacation not in [none, '']\n   and
