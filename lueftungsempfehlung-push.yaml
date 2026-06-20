@@ -1,0 +1,212 @@
+blueprint:
+  name: "💨 Lüftungsempfehlung Push [v1.0]"
+  description: |
+    # 💨 Lüftungsempfehlung Push
+
+    Schickt dir eine **Sammel-Benachrichtigung** aufs Handy, sobald sich die
+    Lüftungsempfehlung für deine Räume ändert — gegen **Feuchtigkeit /
+    Schimmel** und im **Sommer gegen Hitze**. Eine Push, alle betroffenen
+    Räume auf einen Blick: „Lüften: Schlafzimmer, Bad, HWR".
+
+    ## 🧩 Zwei-Teile-Setup
+
+    Dieser Blueprint ist der **Zusteller** — die eigentliche Raum-für-Raum-
+    Logik steckt in einem kleinen **Template-Sensor**, den du einmal anlegst
+    (komplettes Copy-&-Paste-YAML in der
+    [Doku](https://github.com/Disane87/homeassistant-blueprints/blob/main/docs/lueftungsempfehlung-push.md)).
+
+    Warum getrennt? Die Empfehlung hängt an **vielen** Sensoren (Temp +
+    absolute Feuchte je Raum + Außenluft). Ein Template-Sensor rechnet das
+    sauber event-getrieben und DRY in **einem** Entity zusammen — der
+    Blueprint muss sich dann nur noch um Entprellung, Ruhezeiten und die
+    hübsche Push kümmern. Der Blueprint ist dadurch auch für **jede andere**
+    „Liste-im-Attribut → Push"-Empfehlung wiederverwendbar.
+
+    Der Empfehlungs-Sensor muss liefern:
+
+    - **State** = Anzahl Räume mit Empfehlung (numerisch)
+    - **Attribut `signatur`** = stabile Kennung der aktuellen Empfehlung
+      (ihr Wechsel löst die Push aus)
+    - **Attribut `text`** = fertig formatierter Push-Text
+
+    ## ✨ Features
+
+    - 📱 **Eine Sammel-Push** statt elf Einzel-Notifications
+    - 🔁 **Nur bei echter Änderung** — getriggert über das `signatur`-Attribut
+    - ⏱️ **Entprellung**, damit es an den Schwellen nicht flattert
+    - 🌙 **Ruhezeiten** — nachts kein Aufwecken
+    - 🍏 **iOS-`tag`** → aktualisiert die bestehende Benachrichtigung statt zu
+      stapeln; **Android-`channel`** analog
+    - 👆 **Tap öffnet das Dashboard** (konfigurierbarer Lovelace-Pfad)
+
+    ## 🚀 Quick Start
+
+    1. **Template-Sensor anlegen** (siehe Doku → `sensor.luftungsempfehlung`)
+    2. **Diesen Blueprint importieren** und eine Automation daraus erstellen
+    3. **Empfehlungs-Sensor** = dein Template-Sensor, **Notify-Service** =
+       z. B. `notify.notify` oder `notify.mobile_app_iphone`
+    4. Fertig — die Push kommt, sobald sich die Empfehlung ändert (außerhalb
+       der Ruhezeit)
+
+    ## ⚙️ Empfohlene Werte
+
+    | Parameter | Default | Warum dieser Wert? |
+    |---|---|---|
+    | Entprellung | **5 min** | Lang genug gegen Schwellen-Flattern, kurz genug zum Reagieren |
+    | Ruhezeit | **22:30 – 06:30** | Keine Pushes im Schlaf |
+
+    ---
+
+    **Made with 💨 by [@Disane87](https://github.com/Disane87)** —
+    [Issues & Feature Requests](https://github.com/Disane87/homeassistant-blueprints/issues)
+
+  domain: automation
+  author: "marco@disane.dev"
+  homeassistant:
+    min_version: "2024.8.0"
+
+  input:
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # EMPFEHLUNGS-SENSOR (Pflicht)
+    # ═══════════════════════════════════════════════════════════════════════
+    empfehlungs_sensor:
+      name: "Empfehlungs-Sensor"
+      description: >
+        Template-Sensor mit State = Anzahl Räume, Attribut 'signatur'
+        (Änderungserkennung) und Attribut 'text' (fertiger Push-Text).
+        Standard in diesem Setup: sensor.luftungsempfehlung
+      selector:
+        entity:
+          domain: sensor
+
+    aenderungs_attribut:
+      name: "Änderungs-Attribut"
+      description: "Attribut, dessen Wechsel die Push auslöst."
+      default: "signatur"
+      selector:
+        text:
+
+    text_attribut:
+      name: "Text-Attribut"
+      description: "Attribut, das den fertigen Push-Text enthält."
+      default: "text"
+      selector:
+        text:
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BENACHRICHTIGUNG
+    # ═══════════════════════════════════════════════════════════════════════
+    benachrichtigungsdienst:
+      name: "Notify-Service"
+      description: >
+        Voller Service-Name, z. B. notify.notify oder
+        notify.mobile_app_iphone_marco.
+      default: "notify.notify"
+      selector:
+        text:
+
+    titel:
+      name: "Titel der Benachrichtigung"
+      default: "💨 Lüften empfohlen"
+      selector:
+        text:
+
+    dashboard_pfad:
+      name: "Dashboard-Pfad (beim Tippen öffnen)"
+      description: >
+        Relativer Lovelace-Pfad, der beim Antippen der Push geöffnet wird.
+        Leer lassen zum Deaktivieren.
+      default: "/lovelace-0/0"
+      selector:
+        text:
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ENTPRELLUNG & RUHEZEITEN
+    # ═══════════════════════════════════════════════════════════════════════
+    entprellung:
+      name: "Entprellung (Minuten)"
+      description: >
+        So lange muss die Empfehlung stabil sein, bevor gepusht wird
+        (verhindert Flattern an den Schwellen).
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 1
+          unit_of_measurement: "min"
+          mode: slider
+
+    ruhezeit_ende:
+      name: "Ruhezeit Ende (ab wann Pushes erlaubt)"
+      default: "06:30:00"
+      selector:
+        time:
+
+    ruhezeit_start:
+      name: "Ruhezeit Beginn (ab wann keine Pushes mehr)"
+      default: "22:30:00"
+      selector:
+        time:
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VARIABLEN
+# ─────────────────────────────────────────────────────────────────────────────
+variables:
+  v_svc: !input benachrichtigungsdienst
+  v_sensor: !input empfehlungs_sensor
+  v_text_attr: !input text_attribut
+  v_titel: !input titel
+  v_dashboard: !input dashboard_pfad
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGER — Wechsel des Signatur-Attributs (entprellt)
+# ─────────────────────────────────────────────────────────────────────────────
+trigger:
+  - platform: state
+    entity_id: !input empfehlungs_sensor
+    attribute: !input aenderungs_attribut
+    for:
+      minutes: !input entprellung
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONDITIONS — Sicherheits-Checks zuerst
+# ─────────────────────────────────────────────────────────────────────────────
+condition:
+  # Nur pushen, wenn mindestens ein Raum eine Empfehlung hat
+  - condition: numeric_state
+    entity_id: !input empfehlungs_sensor
+    above: 0
+  # Nicht in der Ruhezeit (true zwischen Ruhezeit-Ende und Ruhezeit-Beginn)
+  - condition: time
+    after: !input ruhezeit_ende
+    before: !input ruhezeit_start
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AKTION — Sammel-Push
+# ─────────────────────────────────────────────────────────────────────────────
+action:
+  - service: "{{ v_svc }}"
+    continue_on_error: true
+    data:
+      title: "{{ v_titel }}"
+      message: "{{ state_attr(v_sensor, v_text_attr) }}"
+      data:
+        # iOS: gleiche tag → aktualisiert statt zu stapeln
+        tag: "lueftungsempfehlung"
+        group: "Klima"
+        # Android: gleicher channel/tag → ersetzt die vorige Notification
+        channel: "Klima"
+        notification_icon: "mdi:weather-windy"
+        url: "{{ v_dashboard }}"
+        clickAction: "{{ v_dashboard }}"
+        push:
+          interruption-level: "active"
+
+mode: single
+max_exceeded: silent
