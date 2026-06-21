@@ -10,6 +10,7 @@ blueprint:
     Modi-Phasen (Eco / Super-Boost beim Start / Sleep-Mode mit Profilauswahl) mit
     Wochentag-Filter. Manuelle Eingriffe (UI / App / Voice) werden via context.user_id
     erkannt und überschreiben die Automation bis zum nächsten Aktiv-Zeitfenster —
+    optional robust per input_boolean-Latch (überlebt Context-Resets durch Geräte-Polling) —
     nur Urlaub und Fenster-offen bleiben harte Safety-Overrides.
 
     '
@@ -210,6 +211,27 @@ blueprint:
           default: true
           selector:
             boolean: {}
+        manual_boolean:
+          name: Manuell-Override Helfer (optional)
+          description: 'Optionaler input_boolean, der manuelle Eingriffe robust
+            "latcht". Hintergrund: Die Erkennung über climate.context.user_id ist
+            fragil, weil viele Integrationen (z.B. ConnectLife) das Gerät pollen und
+            dabei den Context zurücksetzen (user_id → none) — der Manuell-Override
+            verfällt dann nach Sekunden und die Automation schaltet außerhalb des
+            Zeitfensters wieder ab. Setzt eine externe Automation diesen Helfer ON,
+            sobald ein Mensch die Klimaanlage ändert, überlebt der Override die
+            Poll-Updates. Ist der Helfer ON, gilt manual_override unabhängig vom
+            Context. Leer lassen = nur die context.user_id-Erkennung (altes Verhalten).
+            Beispiel-Automation siehe docs/manual-override-latch.md.
+
+            '
+          default:
+          selector:
+            entity:
+              domain:
+              - input_boolean
+              reorder: false
+              multiple: false
     section_zeit:
       name: Zeitfenster
       icon: mdi:clock-outline
@@ -692,6 +714,7 @@ variables:
   _cool_max_delta: !input cool_max_delta_t
   _min_cycle: !input min_cycle_minutes
   _self_regulate: !input self_regulate
+  _manual_boolean: !input manual_boolean
   _cool_enabled: !input cool_enabled
   _heat_enabled: !input heat_enabled
   _cool_trigger: !input cool_room_trigger
@@ -780,7 +803,7 @@ action:
     has_sleep_select: "{{ _sleep_select not in [none, ''] }}"
     cool_active_seconds: "{{ (now() - states[_climate].last_changed).total_seconds() if (states[_climate] is not none and current_mode == 'cool') else 0 }}"
     in_boost_window: "{{ _boost_enabled and current_mode == 'cool' and cool_active_seconds <= (_boost_minutes * 60) }}"
-    manual_override: "{% set ws = today_at(_time_start) %}{% set last_ws = ws if now() >= ws else ws - timedelta(days=1) %}{{ states[_climate] is not none and states[_climate].context.user_id is not none and states[_climate].last_changed >= last_ws }}"
+    manual_override: "{% set ws = today_at(_time_start) %}{% set last_ws = ws if now() >= ws else ws - timedelta(days=1) %}{% set ctx_manual = states[_climate] is not none and states[_climate].context.user_id is not none and states[_climate].last_changed >= last_ws %}{% set latch_manual = _manual_boolean not in [none, ''] and is_state(_manual_boolean | string, 'on') %}{{ ctx_manual or latch_manual }}"
 - choose:
   - conditions:
     - condition: template
