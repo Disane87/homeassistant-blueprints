@@ -5,6 +5,7 @@ Alle nennenswerten Änderungen an diesem Repo. Format: [Keep a Changelog](https:
 ## [Unreleased]
 
 ### Added
+- **`lueftungsempfehlung-push.yaml`** — neuer Blueprint: Sammel-Push aufs Handy „lüften ja/nein", sobald sich die Lüftungsempfehlung ändert (gegen Feuchte/Schimmel + im Sommer gegen Hitze). Triggert auf das `signatur`-Attribut eines Companion-Template-Sensors, entprellt, respektiert Ruhezeiten und ersetzt via iOS-`tag`/Android-`channel` die vorige Benachrichtigung statt zu stapeln. Doku inkl. komplett kopierbarem Template-Sensor `sensor.luftungsempfehlung` in `docs/lueftungsempfehlung-push.md`.
 - **`klimaanlage-smart-control.yaml`**: Neuer Schalter `cool_adaptive_target_enabled` (Default `true`, backward compatible). Wenn aus, wird der eingestellte `cool_target_temp` IMMER verwendet — der adaptive Clamp gegen die Außentemperatur (`outdoor − cool_max_delta_t`) entfällt. Use-Case: bei 35 °C draußen wirklich auf 23 °C kühlen statt nur auf 28 °C.
 - **`klimaanlage-smart-control.yaml`**: Neue Section **„Modi (Eco / Super / Sleep)"** mit drei optionalen, zeit-/wochentag-basierten Phasen — alle Inputs leer lassen = Verhalten unverändert (backward compatible):
   - **Eco-Phase** (`eco_switch`, `eco_enabled`, `eco_time_start`, `eco_time_end`): schaltet einen Eco-Switch der Klimaanlage im konfigurierten Zeitfenster automatisch ein/aus. Geht die AC aus (Fenster/Urlaub/no_presence/time_end), wird Eco ebenfalls deaktiviert.
