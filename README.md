@@ -87,3 +87,9 @@ Versionierter Verlauf in [CHANGELOG.md](CHANGELOG.md). Format: [Keep a Changelog
 - 📝 Blog: [blog.disane.dev](https://blog.disane.dev) — Tutorials, Reviews, Home-Lab-Notizen
 - 🏡 HA-Config-Backup: [Disane87/homeassistant-config](https://github.com/Disane87/homeassistant-config) *(privat, aber zeigt den Stack als Ganzes)*
 - 🛠 Mein anderer HA-Kram: [Disane87/spoolman-homeassistant](https://github.com/Disane87/spoolman-homeassistant), [Disane87/esphome-ha-eink](https://github.com/Disane87/esphome-ha-eink)
+
+---
+
+<p align="center">
+  Made by me at <a href="https://subthiel.eu/softwareentwicklung">Subthiel</a> — software development &amp; 3D printing
+</p>
