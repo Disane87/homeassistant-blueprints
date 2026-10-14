@@ -1,10 +1,14 @@
 blueprint:
   name: "🌞 Heizung Sommermodus (Smart)"
   description: >
-    Schaltet Thermostate automatisch AUS wenn die Außentemperatur dauerhaft
-    über einem Schwellwert bleibt – und wieder EIN im Herbst. Das normale
-    Heizprogramm läuft danach unverändert weiter. Verwendet Hysterese um
-    Flapping zu verhindern. Optional: wöchentliche Ventilübung.
+    Schaltet Thermostate automatisch AUS wenn die Außentemperatur über einem
+    Schwellwert liegt – und wieder EIN wenn sie darunter fällt. Die Prüfung läuft
+    kontinuierlich (bei jeder Sensoränderung und zusätzlich alle 15 Minuten),
+    nicht nur zu festen Zeitpunkten. Zwischen den beiden Schwellwerten gilt eine
+    Hysterese (es passiert nichts). Das normale Heizprogramm läuft danach
+    unverändert weiter. Tipp: Für stabile Ergebnisse einen 24h-Mittelwert-Sensor
+    (Statistik-Helfer) als Durchschnittssensor angeben, damit Tag/Nacht-Schwankungen
+    nicht ständig umschalten. Optional: wöchentliche Ventilübung.
   domain: automation
   author: "marco@disane.dev"
   homeassistant:
@@ -20,6 +24,17 @@ blueprint:
           domain: sensor
           device_class: temperature
 
+    outdoor_temp_avg_sensor:
+      name: "Durchschnitts-Sensor (optional, empfohlen)"
+      description: >
+        Sensor mit gemittelter Außentemperatur, z.B. ein Statistik-Helfer
+        (Mittelwert über 24h) auf dem Außentemperatursensor. Wenn gesetzt, wird
+        dieser Wert für die Entscheidung verwendet, sonst der aktuelle Wert.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
     climate_targets:
       name: "Thermostate"
       description: "Wähle alle Thermostate aus. Mehrfachauswahl möglich."
@@ -28,9 +43,21 @@ blueprint:
           domain: climate
           multiple: true
 
+    ac_targets:
+      name: "Klimaanlagen pro Raum (optional)"
+      description: >
+        Klimaanlagen/Split-Geräte, die im Winter mitheizen. Sie werden wie die
+        Thermostate im Sommermodus ausgeschaltet und im Herbst wieder eingeschaltet.
+        Mehrere Räume möglich. Von der Ventilübung ausgenommen.
+      default: []
+      selector:
+        entity:
+          domain: climate
+          multiple: true
+
     summer_on_threshold:
       name: "Einschalt-Schwellwert Sommermodus"
-      description: "Außentemperatur ab der die Thermostate ausgeschaltet werden."
+      description: "Liegt die Temperatur über diesem Wert, werden die Thermostate ausgeschaltet."
       default: 15
       selector:
         number:
@@ -42,7 +69,7 @@ blueprint:
 
     summer_off_threshold:
       name: "Ausschalt-Schwellwert (Hysterese)"
-      description: "Außentemperatur unter der die Thermostate wieder eingeschaltet werden."
+      description: "Liegt die Temperatur unter diesem Wert, werden die Thermostate wieder eingeschaltet."
       default: 12
       selector:
         number:
@@ -52,16 +79,16 @@ blueprint:
           unit_of_measurement: "°C"
           mode: slider
 
-    confirmation_hours:
-      name: "Bestätigungsdauer (Stunden)"
-      description: "Wie lange die Temperatur den Schwellwert anhalten muss bevor umgeschaltet wird."
-      default: 24
+    check_interval_minutes:
+      name: "Prüfintervall (Minuten)"
+      description: "Zusätzlich zu Sensoränderungen wird in diesem Abstand geprüft (Schaltzustand wird so auch nach manuellem Eingriff oder Heizprogramm korrigiert)."
+      default: 15
       selector:
         number:
-          min: 1
-          max: 72
-          step: 1
-          unit_of_measurement: "h"
+          min: 5
+          max: 60
+          step: 5
+          unit_of_measurement: "min"
           mode: box
 
     valve_exercise_enabled:
@@ -73,6 +100,7 @@ blueprint:
 
     valve_exercise_day:
       name: "Wochentag der Ventilübung"
+      description: "0=Montag, 1=Dienstag, 2=Mittwoch, 3=Donnerstag, 4=Freitag, 5=Samstag, 6=Sonntag"
       default: 0
       selector:
         number:
@@ -80,7 +108,6 @@ blueprint:
           max: 6
           step: 1
           mode: box
-          # 0=Montag, 1=Dienstag, 2=Mittwoch, 3=Donnerstag, 4=Freitag, 5=Samstag, 6=Sonntag
 
     valve_exercise_time:
       name: "Uhrzeit der Ventilübung"
@@ -112,42 +139,72 @@ variables:
   valve_exercise_day: !input valve_exercise_day
   valve_exercise_duration: !input valve_exercise_duration
   outdoor_temp_sensor: !input outdoor_temp_sensor
+  outdoor_temp_avg_sensor: !input outdoor_temp_avg_sensor
+  climate_targets: !input climate_targets
+  ac_targets: !input ac_targets
+  all_targets: "{{ (climate_targets + ac_targets) | unique | list }}"
   summer_on_threshold: !input summer_on_threshold
+  summer_off_threshold: !input summer_off_threshold
+  # Für die Entscheidung genutzter Wert: Durchschnittssensor, sonst aktueller Wert
+  eval_entity: >
+    {{ outdoor_temp_avg_sensor if outdoor_temp_avg_sensor else outdoor_temp_sensor }}
+  eval_temp: "{{ states(eval_entity) }}"
+  # Thermostate, die gerade nicht aus (und erreichbar) sind
+  heating_active: >
+    {{ expand(all_targets) | rejectattr('state', 'in', ['off', 'unavailable', 'unknown']) | map(attribute='entity_id') | list }}
+  # Thermostate, die gerade aus sind
+  heating_off: >
+    {{ expand(all_targets) | selectattr('state', 'eq', 'off') | map(attribute='entity_id') | list }}
 
+# Während der Ventilübung (delay) werden weitere Auslöser bewusst verworfen
 mode: single
 max_exceeded: silent
 
+trigger_variables:
+  check_interval: !input check_interval_minutes
+
 trigger:
 
-  - platform: numeric_state
-    id: "sommer_an"
+  # Kontinuierlich: bei jeder Änderung des Außensensors (der Durchschnittssensor
+  # wird über den zyklischen Trigger erfasst)
+  - platform: state
+    id: "pruefen"
     entity_id: !input outdoor_temp_sensor
-    above: !input summer_on_threshold
-    for:
-      hours: !input confirmation_hours
 
-  - platform: numeric_state
-    id: "sommer_aus"
-    entity_id: !input outdoor_temp_sensor
-    below: !input summer_off_threshold
-    for:
-      hours: !input confirmation_hours
+  # Zusätzlich zyklisch, damit auch ohne Sensoränderung geprüft wird
+  - platform: time_pattern
+    id: "pruefen"
+    minutes: "/{{ check_interval | int }}"
+
+  # Nach einem Neustart sofort prüfen
+  - platform: homeassistant
+    id: "pruefen"
+    event: start
 
   - platform: time
     id: "ventil_uebung"
     at: !input valve_exercise_time
 
+condition: []
+
 action:
   - choose:
 
+      # Sommermodus: zu warm -> alles ausschalten, was noch an ist
       - conditions:
           - condition: trigger
-            id: "sommer_an"
+            id: "pruefen"
+          - condition: template
+            value_template: "{{ is_number(eval_temp) }}"
+          - condition: template
+            value_template: "{{ eval_temp | float > summer_on_threshold | float }}"
+          - condition: template
+            value_template: "{{ heating_active | count > 0 }}"
         sequence:
-          - alias: "Alle Thermostate ausschalten"
+          - alias: "Thermostate ausschalten"
             service: climate.turn_off
             target:
-              entity_id: !input climate_targets
+              entity_id: "{{ heating_active }}"
           - if:
               - condition: template
                 value_template: "{{ notify_service != '' }}"
@@ -155,16 +212,25 @@ action:
               - service: "{{ notify_service }}"
                 data:
                   title: "🌞 Sommermodus aktiv"
-                  message: "Thermostate wurden ausgeschaltet."
+                  message: >
+                    Thermostate wurden ausgeschaltet
+                    ({{ eval_temp }}°C > {{ summer_on_threshold }}°C).
 
+      # Heizsaison: zu kalt -> alles einschalten, was aus ist
       - conditions:
           - condition: trigger
-            id: "sommer_aus"
+            id: "pruefen"
+          - condition: template
+            value_template: "{{ is_number(eval_temp) }}"
+          - condition: template
+            value_template: "{{ eval_temp | float < summer_off_threshold | float }}"
+          - condition: template
+            value_template: "{{ heating_off | count > 0 }}"
         sequence:
-          - alias: "Alle Thermostate einschalten"
+          - alias: "Thermostate einschalten"
             service: climate.turn_on
             target:
-              entity_id: !input climate_targets
+              entity_id: "{{ heating_off }}"
           - if:
               - condition: template
                 value_template: "{{ notify_service != '' }}"
@@ -172,18 +238,20 @@ action:
               - service: "{{ notify_service }}"
                 data:
                   title: "🍂 Heizsaison beginnt"
-                  message: "Thermostate wurden wieder eingeschaltet."
+                  message: >
+                    Thermostate wurden wieder eingeschaltet
+                    ({{ eval_temp }}°C < {{ summer_off_threshold }}°C).
 
+      # Wöchentliche Ventilübung (nur im Sommermodus)
       - conditions:
           - condition: trigger
             id: "ventil_uebung"
           - condition: template
             value_template: "{{ valve_exercise_enabled }}"
           - condition: template
-            value_template: "{{ now().isoweekday() % 7 == valve_exercise_day | int }}"
-          - condition: numeric_state
-            entity_id: !input outdoor_temp_sensor
-            above: !input summer_on_threshold
+            value_template: "{{ now().weekday() == valve_exercise_day | int }}"
+          - condition: template
+            value_template: "{{ is_number(eval_temp) and eval_temp | float > summer_on_threshold | float }}"
         sequence:
           - alias: "Ventile kurz einschalten"
             service: climate.turn_on
