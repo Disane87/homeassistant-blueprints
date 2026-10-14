@@ -15,7 +15,7 @@ Alle nennenswerten Änderungen an diesem Repo. Format: [Keep a Changelog](https:
 - **`klimaanlage-smart-control.yaml`**: **Manual-Override-Erkennung** via `context.user_id`. Sobald die AC manuell per UI/App/Voice-Assistant verändert wird, überspringt die Automation für den Rest des heutigen Aktiv-Zeitfensters ihre proaktiven Aktionen (cool/heat start, time_end-off, no_presence-off, Modi-Toggles). **Safety-Overrides bleiben aktiv:** Urlaubsmodus und „Fenster offen" schalten weiterhin zwingend ab. Reset passiert automatisch am nächsten `time_start`.
 
 ### Changed
-- **`smart-summer-heating.yaml`**: Prüfung jetzt **kontinuierlich** (Sensoränderung + zyklisch + HA-Start) statt `for: 24h`-Trigger, die im Übergang kaum auslösten (Heizung ging nur nachts aus). Neue optionale Inputs `outdoor_temp_avg_sensor` (24h-Mittelwert), `ac_targets` (Klimaanlagen pro Raum) und `check_interval_minutes`. **Breaking:** `confirmation_hours` entfernt. Fix: Wochentag der Ventilübung (0 = Montag, vorher Sonntag-basiert).
+- **`smart-summer-heating.yaml`**: Prüfung jetzt **kontinuierlich** (Sensoränderung + zyklisch + HA-Start) statt `for: 24h`-Trigger, die im Übergang kaum auslösten (Heizung ging nur nachts aus). Neue optionale Inputs `outdoor_temp_avg_sensor` (24h-Mittelwert), `ac_targets` (Klimaanlagen pro Raum). **Breaking:** `confirmation_hours` entfernt. Fix: Wochentag der Ventilübung (0 = Montag, vorher Sonntag-basiert).
 - **`klimaanlage-smart-control.yaml`**: Defaults für privatpersonenbezogene Entity-IDs entfernt (`binary_sensor.family_presence`, `input_boolean.urlaub`, `sensor.klima_wohnzimmer_wetter_garten_temperature`) — alle Sensor-Felder sind jetzt sauber leer und müssen vom Nutzer aktiv gewählt werden.
 
 ## [2026-05-26] — Klimaanlage Smart Control Release 🎉

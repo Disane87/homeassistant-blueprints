@@ -24,13 +24,12 @@ Dieser Blueprint nimmt der Sache die Manuell-Arbeit ab: über einen Trend-Sensor
 | `ac_targets` | leer | Klimaanlagen pro Raum (Mehrfachauswahl), werden wie Thermostate geschaltet, aber nicht von der Ventilübung erfasst |
 | `summer_on_threshold` | 15 °C | Darüber: Geräte aus |
 | `summer_off_threshold` | 12 °C | Darunter: Geräte wieder an |
-| `check_interval_minutes` | 15 min | Zyklische Prüfung zusätzlich zu Sensoränderungen |
 | `valve_exercise_*` | an, Mo 10:00, 10 min | Wöchentliche Ventilübung (nur im Sommermodus) |
 | `notify_service` | leer | Optionaler Notify-Dienst |
 
 ## ⚙️ Logik
 
-- **Kontinuierliche Prüfung:** bei jeder Änderung des Außensensors, zyklisch alle `check_interval_minutes` und beim HA-Start.
+- **Kontinuierliche Prüfung:** bei jeder Änderung des Außensensors, zyklisch alle 15 Minuten und beim HA-Start.
 - Wert über `summer_on_threshold` → alle Geräte, die noch an sind, werden ausgeschaltet.
 - Wert unter `summer_off_threshold` → alle Geräte, die aus sind, werden eingeschaltet.
 - Dazwischen passiert nichts (Hysterese). Manuelle Eingriffe oder ein Heizprogramm werden beim nächsten Check korrigiert.
