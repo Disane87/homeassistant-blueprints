@@ -79,17 +79,6 @@ blueprint:
           unit_of_measurement: "°C"
           mode: slider
 
-    check_interval_minutes:
-      name: "Prüfintervall (Minuten)"
-      description: "Zusätzlich zu Sensoränderungen wird in diesem Abstand geprüft (Schaltzustand wird so auch nach manuellem Eingriff oder Heizprogramm korrigiert)."
-      default: 15
-      selector:
-        number:
-          min: 5
-          max: 60
-          step: 5
-          unit_of_measurement: "min"
-          mode: box
 
     valve_exercise_enabled:
       name: "Wöchentliche Ventilübung aktivieren"
@@ -160,9 +149,6 @@ variables:
 mode: single
 max_exceeded: silent
 
-trigger_variables:
-  check_interval: !input check_interval_minutes
-
 trigger:
 
   # Kontinuierlich: bei jeder Änderung des Außensensors (der Durchschnittssensor
@@ -174,7 +160,7 @@ trigger:
   # Zusätzlich zyklisch, damit auch ohne Sensoränderung geprüft wird
   - platform: time_pattern
     id: "pruefen"
-    minutes: "/{{ check_interval | int }}"
+    minutes: "/15"
 
   # Nach einem Neustart sofort prüfen
   - platform: homeassistant
